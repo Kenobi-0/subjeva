@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+/* Subjeva Global Dark Mode */
+html.dark {
+  color-scheme: dark;
+}
+
+html.dark body {
+  background: #16181d;
+}
+
+/* Page backgrounds */
+html.dark .bg-\[\#fffaf5\],
+html.dark .bg-\[\#fff7ed\] {
+  background-color: #16181d !important;
+}
+
+/* Gradient / cream cards */
+html.dark [class*="radial-gradient"],
+html.dark [class*="linear-gradient(135deg"],
+html.dark [class*="linear-gradient(180deg"] {
+  background:
+    radial-gradient(circle at top left, rgba(249, 115, 22, 0.14), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(245, 158, 11, 0.1), transparent 34%),
+    linear-gradient(135deg, #1f232b, #232832) !important;
+}
+
+/* Main cards */
+html.dark .bg-white,
+html.dark .bg-white\/90,
+html.dark .bg-white\/85,
+html.dark .bg-white\/95 {
+  background-color: #1f232b !important;
+}
+
+/* Soft cards */
+html.dark .bg-slate-50,
+html.dark .bg-orange-50,
+html.dark .bg-orange-50\/30,
+html.dark .bg-orange-50\/40,
+html.dark .bg-orange-50\/60 {
+  background-color: #252932 !important;
+}
+
+/* Colored soft subject labels */
+html.dark .bg-sky-50,
+html.dark .bg-emerald-50,
+html.dark .bg-amber-50,
+html.dark .bg-purple-50,
+html.dark .bg-rose-50 {
+  background-color: #252932 !important;
+}
+
+/* Borders */
+html.dark .border-orange-100,
+html.dark .border-orange-200,
+html.dark .border-slate-200 {
+  border-color: #2b3038 !important;
+}
+
+/* Text */
+html.dark .text-slate-950,
+html.dark .text-slate-900,
+html.dark .text-slate-800 {
+  color: #f8fafc !important;
+}
+
+html.dark .text-slate-700 {
+  color: #e2e8f0 !important;
+}
+
+html.dark .text-slate-600,
+html.dark .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+html.dark .text-slate-400 {
+  color: #64748b !important;
+}
+
+/* Keep orange brand color strong */
+html.dark .text-orange-600,
+html.dark .text-orange-700,
+html.dark .text-orange-500 {
+  color: #fb923c !important;
+}
+
+/* Inputs */
+html.dark input,
+html.dark textarea,
+html.dark select {
+  background-color: #252932 !important;
+  color: #f8fafc !important;
+  border-color: #343943 !important;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #64748b !important;
+}
+
+/* Progress tracks */
+html.dark .ring-orange-100,
+html.dark .ring-slate-200 {
+  --tw-ring-color: #343943 !important;
+}
+
+/* Selection */
+html.dark ::selection {
+  background: rgba(249, 115, 22, 0.35);
+  color: #fff;
+}

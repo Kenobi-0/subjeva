@@ -7,18 +7,21 @@ import { Caveat } from "next/font/google";
 import StudentLayout from "../../../../components/StudentLayout";
 import {
   calculateSubjectProgress,
-  createId,
-  getSubjevaLessons,
-  getSubjevaLessonsBySubject,
-  getSubjevaSubjectMinutes,
-  getSubjevaSubjects,
-  getSubjevaTotalStudyMinutes,
-  saveSubjevaLessons,
-  saveSubjevaSubjects,
-  saveSubjevaTotalStudyMinutes,
   type SubjevaLesson,
   type SubjevaSubject,
 } from "../../../../lib/subjevaStorage";
+import {
+  completeDbLesson,
+  createDbLesson,
+  deleteDbLesson,
+  getDbLessonsBySubject,
+  getDbSubjectBySlug,
+  getDbSubjectMinutes,
+  getDbTotalStudyMinutes,
+  updateDbSubjectMinutes,
+  updateDbSubjectProgress,
+  updateDbTotalStudyMinutes,
+} from "../../../../lib/subjevaDb";
 
 const caveat = Caveat({
   subsets: ["latin"],
@@ -114,10 +117,30 @@ function getCalendarDays(monthDate: Date) {
   return calendarDays;
 }
 
+function createSyncedSubject(
+  subject: SubjevaSubject,
+  nextLessons: SubjevaLesson[]
+) {
+  const completedLessonCount = nextLessons.filter(
+    (lesson) => lesson.completed
+  ).length;
+
+  return {
+    ...subject,
+    totalUnits: nextLessons.length,
+    completedUnits: completedLessonCount,
+    nextTopic:
+      nextLessons.find((lesson) => !lesson.completed)?.title ||
+      subject.nextTopic ||
+      undefined,
+  };
+}
+
 export default function SubjectDetailPage() {
   const params = useParams();
   const slug = String(params.slug);
 
+  const [isLoading, setIsLoading] = useState(true);
   const [subject, setSubject] = useState<SubjevaSubject | null>(null);
   const [lessons, setLessons] = useState<SubjevaLesson[]>([]);
   const [studyMinutes, setStudyMinutes] = useState(0);
@@ -136,28 +159,42 @@ export default function SubjectDetailPage() {
 
   const [successMessage, setSuccessMessage] = useState("");
 
-  useEffect(() => {
-    function loadSubjectData() {
-      const savedSubjects = getSubjevaSubjects();
-      const foundSubject =
-        savedSubjects.find((item) => item.slug === slug) || null;
+  async function loadSubjectData() {
+    try {
+      setIsLoading(true);
+
+      const foundSubject = await getDbSubjectBySlug(slug);
 
       setSubject(foundSubject);
 
       if (foundSubject) {
-        setLessons(getSubjevaLessonsBySubject(foundSubject.id));
-        setStudyMinutes(getSubjevaSubjectMinutes(foundSubject.slug));
-      }
-    }
+        const savedLessons = await getDbLessonsBySubject(foundSubject.id);
+        const savedMinutes = await getDbSubjectMinutes(foundSubject.id);
 
+        setLessons(savedLessons);
+        setStudyMinutes(savedMinutes);
+      } else {
+        setLessons([]);
+        setStudyMinutes(0);
+      }
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Konu yüklenemedi: ${error.message}`
+          : "Konu yüklenemedi."
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  useEffect(() => {
     loadSubjectData();
 
-    window.addEventListener("storage", loadSubjectData);
     window.addEventListener("subjeva-data-updated", loadSubjectData);
     window.addEventListener("subjeva-study-minutes-updated", loadSubjectData);
 
     return () => {
-      window.removeEventListener("storage", loadSubjectData);
       window.removeEventListener("subjeva-data-updated", loadSubjectData);
       window.removeEventListener(
         "subjeva-study-minutes-updated",
@@ -165,44 +202,6 @@ export default function SubjectDetailPage() {
       );
     };
   }, [slug]);
-
-  function updateSubject(nextSubject: SubjevaSubject) {
-    const allSubjects = getSubjevaSubjects();
-
-    const nextSubjects = allSubjects.map((item) =>
-      item.id === nextSubject.id ? nextSubject : item
-    );
-
-    saveSubjevaSubjects(nextSubjects);
-    setSubject(nextSubject);
-  }
-
-  function syncSubjectProgressWithLessons(
-    currentSubject: SubjevaSubject,
-    nextLessons: SubjevaLesson[]
-  ) {
-    const completedLessonCount = nextLessons.filter(
-      (lesson) => lesson.completed
-    ).length;
-
-    const nextSubject: SubjevaSubject = {
-      ...currentSubject,
-      totalUnits: nextLessons.length,
-      completedUnits: completedLessonCount,
-      nextTopic:
-        nextLessons.find((lesson) => !lesson.completed)?.title ||
-        currentSubject.nextTopic ||
-        undefined,
-    };
-
-    updateSubject(nextSubject);
-  }
-
-  function getAllLessonsExceptSubject(subjectId: string) {
-    const allLessons = getSubjevaLessons();
-
-    return allLessons.filter((lesson) => lesson.subjectId !== subjectId);
-  }
 
   function goToPreviousMonth() {
     setCalendarMonth(
@@ -244,7 +243,7 @@ export default function SubjectDetailPage() {
     setLessonDates(lessonDates.filter((item) => item !== date));
   }
 
-  function handleAddLesson(event: FormEvent<HTMLFormElement>) {
+  async function handleAddLesson(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!subject) return;
@@ -262,42 +261,44 @@ export default function SubjectDetailPage() {
       return;
     }
 
-    const newLesson: SubjevaLesson = {
-      id: createId(),
-      subjectId: subject.id,
-      subjectSlug: subject.slug,
-      subjectName: subject.name,
-      title: cleanTitle,
-      dates: lessonDates,
-      detail:
+    try {
+      const newLesson = await createDbLesson(
+        subject,
+        cleanTitle,
+        lessonDates,
         cleanDetail ||
-        "Bu ders için henüz açıklama eklenmedi. Daha sonra detaylandırılabilir.",
-      completed: false,
-      studyMinutes: 0,
-      createdAt: new Date().toISOString(),
-    };
+          "Bu ders için henüz açıklama eklenmedi. Daha sonra detaylandırılabilir."
+      );
 
-    const currentSubjectLessons = getSubjevaLessonsBySubject(subject.id);
-    const otherLessons = getAllLessonsExceptSubject(subject.id);
-    const nextSubjectLessons = [newLesson, ...currentSubjectLessons];
+      const nextLessons = [newLesson, ...lessons];
 
-    saveSubjevaLessons([...nextSubjectLessons, ...otherLessons]);
-    setLessons(nextSubjectLessons);
-    syncSubjectProgressWithLessons(subject, nextSubjectLessons);
+      await updateDbSubjectProgress(subject, nextLessons);
 
-    setLessonTitle("");
-    setLessonDetail("");
-    setLessonDates([]);
-    setSelectedCalendarDates([]);
+      setLessons(nextLessons);
+      setSubject(createSyncedSubject(subject, nextLessons));
 
-    setSuccessMessage(`${cleanTitle} ${lessonDates.length} tarihe eklendi!`);
+      setLessonTitle("");
+      setLessonDetail("");
+      setLessonDates([]);
+      setSelectedCalendarDates([]);
 
-    setTimeout(() => {
-      setSuccessMessage("");
-    }, 1600);
+      window.dispatchEvent(new Event("subjeva-data-updated"));
+
+      setSuccessMessage(`${cleanTitle} ${lessonDates.length} tarihe eklendi!`);
+
+      setTimeout(() => {
+        setSuccessMessage("");
+      }, 1600);
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Ders eklenemedi: ${error.message}`
+          : "Ders eklenemedi."
+      );
+    }
   }
 
-  function completeLesson(lesson: SubjevaLesson) {
+  async function completeLesson(lesson: SubjevaLesson) {
     if (!subject) return;
 
     const minutes = Number(lessonMinutesInput[lesson.id]);
@@ -307,51 +308,56 @@ export default function SubjectDetailPage() {
       return;
     }
 
-    const otherLessons = getAllLessonsExceptSubject(subject.id);
+    try {
+      await completeDbLesson(lesson, minutes);
 
-    const nextSubjectLessons = lessons.map((item) => {
-      if (item.id !== lesson.id) return item;
+      const nextLessons = lessons.map((item) => {
+        if (item.id !== lesson.id) return item;
 
-      return {
-        ...item,
-        completed: true,
-        studyMinutes: item.studyMinutes + minutes,
-      };
-    });
+        return {
+          ...item,
+          completed: true,
+          studyMinutes: item.studyMinutes + minutes,
+        };
+      });
 
-    saveSubjevaLessons([...nextSubjectLessons, ...otherLessons]);
-    setLessons(nextSubjectLessons);
+      const currentSubjectMinutes = await getDbSubjectMinutes(subject.id);
+      const nextSubjectMinutes = currentSubjectMinutes + minutes;
 
-    const nextSubjectMinutes = studyMinutes + minutes;
-    const currentTotalMinutes = getSubjevaTotalStudyMinutes();
-    const nextTotalMinutes = currentTotalMinutes + minutes;
+      const currentTotalMinutes = await getDbTotalStudyMinutes();
+      const nextTotalMinutes = currentTotalMinutes + minutes;
 
-    localStorage.setItem(
-      `subjeva-subject-minutes-${subject.slug}`,
-      String(nextSubjectMinutes)
-    );
+      await updateDbSubjectMinutes(subject.id, nextSubjectMinutes);
+      await updateDbTotalStudyMinutes(nextTotalMinutes);
+      await updateDbSubjectProgress(subject, nextLessons);
 
-    saveSubjevaTotalStudyMinutes(nextTotalMinutes);
+      setLessons(nextLessons);
+      setStudyMinutes(nextSubjectMinutes);
+      setSubject(createSyncedSubject(subject, nextLessons));
 
-    setStudyMinutes(nextSubjectMinutes);
-    setLessonMinutesInput({
-      ...lessonMinutesInput,
-      [lesson.id]: "",
-    });
+      setLessonMinutesInput({
+        ...lessonMinutesInput,
+        [lesson.id]: "",
+      });
 
-    syncSubjectProgressWithLessons(subject, nextSubjectLessons);
+      window.dispatchEvent(new Event("subjeva-study-minutes-updated"));
+      window.dispatchEvent(new Event("subjeva-data-updated"));
 
-    window.dispatchEvent(new Event("subjeva-study-minutes-updated"));
-    window.dispatchEvent(new Event("subjeva-data-updated"));
+      setSuccessMessage(`${lesson.title} tamamlandı! +${minutes} dk eklendi 🎉`);
 
-    setSuccessMessage(`${lesson.title} tamamlandı! +${minutes} dk eklendi 🎉`);
-
-    setTimeout(() => {
-      setSuccessMessage("");
-    }, 1800);
+      setTimeout(() => {
+        setSuccessMessage("");
+      }, 1800);
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Ders tamamlanamadı: ${error.message}`
+          : "Ders tamamlanamadı."
+      );
+    }
   }
 
-  function deleteLesson(lesson: SubjevaLesson) {
+  async function deleteLesson(lesson: SubjevaLesson) {
     if (!subject) return;
 
     const confirmed = confirm(
@@ -360,45 +366,76 @@ export default function SubjectDetailPage() {
 
     if (!confirmed) return;
 
-    const otherLessons = getAllLessonsExceptSubject(subject.id);
-    const nextSubjectLessons = lessons.filter((item) => item.id !== lesson.id);
+    try {
+      const nextLessons = lessons.filter((item) => item.id !== lesson.id);
 
-    const currentSubjectMinutes = getSubjevaSubjectMinutes(subject.slug);
-    const nextSubjectMinutes = Math.max(
-      currentSubjectMinutes - lesson.studyMinutes,
-      0
+      const currentSubjectMinutes = await getDbSubjectMinutes(subject.id);
+      const nextSubjectMinutes = Math.max(
+        currentSubjectMinutes - lesson.studyMinutes,
+        0
+      );
+
+      const currentTotalMinutes = await getDbTotalStudyMinutes();
+      const nextTotalMinutes = Math.max(
+        currentTotalMinutes - lesson.studyMinutes,
+        0
+      );
+
+      await deleteDbLesson(lesson.id);
+      await updateDbSubjectMinutes(subject.id, nextSubjectMinutes);
+      await updateDbTotalStudyMinutes(nextTotalMinutes);
+      await updateDbSubjectProgress(subject, nextLessons);
+
+      setLessons(nextLessons);
+      setStudyMinutes(nextSubjectMinutes);
+      setSubject(createSyncedSubject(subject, nextLessons));
+
+      window.dispatchEvent(new Event("subjeva-data-updated"));
+      window.dispatchEvent(new Event("subjeva-study-minutes-updated"));
+
+      setSuccessMessage(
+        `${lesson.title} silindi. -${lesson.studyMinutes} dk düşüldü.`
+      );
+
+      setTimeout(() => {
+        setSuccessMessage("");
+      }, 1600);
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Ders silinemedi: ${error.message}`
+          : "Ders silinemedi."
+      );
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <StudentLayout
+        activePage="Subjects"
+        topbarSubtitle="Konu yükleniyor"
+        primaryAction={{
+          label: "Konulara Dön",
+          href: "/student/subjects",
+        }}
+        sidebarTitle="Konu yükleniyor."
+        sidebarDescription="Bu konu Supabase veritabanından alınıyor."
+      >
+        <div className="mx-auto flex min-h-[70vh] max-w-7xl items-center justify-center px-6 py-8">
+          <div className="rounded-[34px] border border-orange-100 bg-white p-8 text-center shadow-sm">
+            <p
+              className={`${caveat.className} text-4xl font-bold text-orange-600`}
+            >
+              Konu yükleniyor...
+            </p>
+
+            <p className="mt-3 leading-7 text-slate-600">
+              Bu hesaba ait konu bilgileri alınıyor.
+            </p>
+          </div>
+        </div>
+      </StudentLayout>
     );
-
-    const currentTotalMinutes = getSubjevaTotalStudyMinutes();
-    const nextTotalMinutes = Math.max(
-      currentTotalMinutes - lesson.studyMinutes,
-      0
-    );
-
-    saveSubjevaLessons([...nextSubjectLessons, ...otherLessons]);
-
-    localStorage.setItem(
-      `subjeva-subject-minutes-${subject.slug}`,
-      String(nextSubjectMinutes)
-    );
-
-    saveSubjevaTotalStudyMinutes(nextTotalMinutes);
-
-    setLessons(nextSubjectLessons);
-    setStudyMinutes(nextSubjectMinutes);
-
-    syncSubjectProgressWithLessons(subject, nextSubjectLessons);
-
-    window.dispatchEvent(new Event("subjeva-data-updated"));
-    window.dispatchEvent(new Event("subjeva-study-minutes-updated"));
-
-    setSuccessMessage(
-      `${lesson.title} silindi. -${lesson.studyMinutes} dk düşüldü.`
-    );
-
-    setTimeout(() => {
-      setSuccessMessage("");
-    }, 1600);
   }
 
   if (!subject) {
@@ -411,7 +448,7 @@ export default function SubjectDetailPage() {
           href: "/student/subjects",
         }}
         sidebarTitle="Konu bulunamadı."
-        sidebarDescription="Bu konu silinmiş ya da henüz oluşturulmamış olabilir."
+        sidebarDescription="Bu konu silinmiş ya da bu hesaba ait olmayabilir."
       >
         <div className="mx-auto flex min-h-[70vh] max-w-7xl items-center justify-center px-6 py-8">
           <motion.div
@@ -432,7 +469,7 @@ export default function SubjectDetailPage() {
             </h1>
 
             <p className="mt-3 leading-7 text-slate-600">
-              Bu sayfa sadece gerçekten eklediğin konuları açar.
+              Bu sayfa sadece giriş yaptığın hesaba ait konuları açar.
             </p>
 
             <a
@@ -461,7 +498,7 @@ export default function SubjectDetailPage() {
         href: "/student/subjects",
       }}
       sidebarTitle="Konu → Dersler."
-      sidebarDescription="Önce konuyu oluştur, sonra bu konunun altına çalışacağın dersleri tarih seçerek ekle."
+      sidebarDescription="Bu konu ve dersleri sadece giriş yaptığın Supabase hesabına aittir."
     >
       <AnimatePresence>
         {successMessage ? (

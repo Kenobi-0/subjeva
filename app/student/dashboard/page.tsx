@@ -430,97 +430,70 @@ export default function StudentDashboardPage() {
           )}
         </motion.section>
 
-        <motion.section
-          variants={scrollReveal}
-          initial="hidden"
-          whileInView="visible"
-          viewport={{ once: false, amount: 0.2 }}
-          transition={{ duration: 0.75, ease: "easeOut" }}
-          className="mb-8 overflow-hidden rounded-[36px] border border-orange-100 bg-[radial-gradient(circle_at_top_left,_rgba(251,146,60,0.18),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(245,158,11,0.12),_transparent_30%),linear-gradient(135deg,_#FFFFFF,_#FFF7ED)] p-7 shadow-sm"
+        {mainTarget ? (
+  <motion.section
+    variants={scrollReveal}
+    initial="hidden"
+    whileInView="visible"
+    viewport={{ once: false, amount: 0.2 }}
+    transition={{ duration: 0.75, ease: "easeOut" }}
+    className="mb-8 overflow-hidden rounded-[36px] border border-orange-100 bg-[radial-gradient(circle_at_top_left,_rgba(251,146,60,0.18),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(245,158,11,0.12),_transparent_30%),linear-gradient(135deg,_#FFFFFF,_#FFF7ED)] p-7 shadow-sm"
+  >
+    <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-center">
+      <div>
+        <p className="text-sm font-bold uppercase tracking-[0.2em] text-orange-500">
+          Ana Hedef
+        </p>
+
+        <h2 className="mt-3 text-4xl font-extrabold text-slate-950 md:text-5xl">
+          {mainTarget.name}
+        </h2>
+
+        <p className="mt-3 text-lg text-slate-600">
+          Hedef tarihi:{" "}
+          <span className="font-bold text-slate-950">
+            {mainTarget.date}
+          </span>
+        </p>
+
+        <p className="mt-3 max-w-2xl leading-7 text-slate-600">
+          {mainTarget.description}
+        </p>
+
+        <a
+          href="/student/main-target"
+          className="mt-5 inline-flex rounded-xl border border-orange-100 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:border-orange-200 hover:text-orange-600"
         >
-          {mainTarget ? (
-            <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-center">
-              <div>
-                <p className="text-sm font-bold uppercase tracking-[0.2em] text-orange-500">
-                  Ana Hedef
-                </p>
+          Ana Hedefi Düzenle
+        </a>
+      </div>
 
-                <h2 className="mt-3 text-4xl font-extrabold text-slate-950 md:text-5xl">
-                  {mainTarget.name}
-                </h2>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="rounded-3xl border border-orange-100 bg-white px-8 py-5 text-center shadow-sm">
+          <p className="text-4xl font-extrabold text-orange-600">
+            {countdown.days}
+          </p>
+          <p className="mt-1 text-sm font-bold text-slate-500">gün</p>
+        </div>
 
-                <p className="mt-3 text-lg text-slate-600">
-                  Hedef tarihi:{" "}
-                  <span className="font-bold text-slate-950">
-                    {mainTarget.date}
-                  </span>
-                </p>
+        <div className="rounded-3xl border border-orange-100 bg-white px-8 py-5 text-center shadow-sm">
+          <p className="text-4xl font-extrabold text-amber-600">
+            {countdown.hours}
+          </p>
+          <p className="mt-1 text-sm font-bold text-slate-500">saat</p>
+        </div>
 
-                <p className="mt-3 max-w-2xl leading-7 text-slate-600">
-                  {mainTarget.description}
-                </p>
+        <div className="rounded-3xl border border-orange-100 bg-white px-8 py-5 text-center shadow-sm">
+          <p className="text-4xl font-extrabold text-emerald-600">
+            {countdown.minutes}
+          </p>
+          <p className="mt-1 text-sm font-bold text-slate-500">dakika</p>
+        </div>
+      </div>
+    </div>
+  </motion.section>
+) : null}
 
-                <a
-                  href="/student/main-target"
-                  className="mt-5 inline-flex rounded-xl border border-orange-100 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:border-orange-200 hover:text-orange-600"
-                >
-                  Ana Hedefi Düzenle
-                </a>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-3xl border border-orange-100 bg-white px-8 py-5 text-center shadow-sm">
-                  <p className="text-4xl font-extrabold text-orange-600">
-                    {countdown.days}
-                  </p>
-                  <p className="mt-1 text-sm font-bold text-slate-500">gün</p>
-                </div>
-
-                <div className="rounded-3xl border border-orange-100 bg-white px-8 py-5 text-center shadow-sm">
-                  <p className="text-4xl font-extrabold text-amber-600">
-                    {countdown.hours}
-                  </p>
-                  <p className="mt-1 text-sm font-bold text-slate-500">
-                    saat
-                  </p>
-                </div>
-
-                <div className="rounded-3xl border border-orange-100 bg-white px-8 py-5 text-center shadow-sm">
-                  <p className="text-4xl font-extrabold text-emerald-600">
-                    {countdown.minutes}
-                  </p>
-                  <p className="mt-1 text-sm font-bold text-slate-500">
-                    dakika
-                  </p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="py-8 text-center">
-              <p className="text-5xl">🎯</p>
-
-              <p className="mt-4 text-sm font-bold uppercase tracking-[0.2em] text-orange-500">
-                Ana Hedef
-              </p>
-
-              <h2 className="mx-auto mt-3 max-w-3xl text-4xl font-extrabold text-slate-950 md:text-5xl">
-                Henüz ana hedef oluşturulmadı.
-              </h2>
-
-              <p className="mx-auto mt-4 max-w-2xl leading-7 text-slate-600">
-                İlk girişte burada YKS veya başka bir hedef yazmayacak.
-                Hedefini oluşturduktan sonra geri sayım burada görünecek.
-              </p>
-
-              <a
-                href="/student/main-target"
-                className="mt-6 inline-flex rounded-2xl bg-orange-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-orange-200 transition hover:bg-orange-600"
-              >
-                + Ana Hedef Ekle
-              </a>
-            </div>
-          )}
-        </motion.section>
 
         <motion.section
           variants={scrollReveal}

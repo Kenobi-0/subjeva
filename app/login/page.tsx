@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Caveat, Inter } from "next/font/google";
 import BrandLogo from "../../components/BrandLogo";
+import { supabase } from "../../lib/supabaseClient";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -46,7 +47,9 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  const [isLoading, setIsLoading] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const cleanEmail = email.trim();
@@ -57,12 +60,29 @@ export default function LoginPage() {
     }
 
     if (!password || password.length < 6) {
-      alert("Demo giriş için en az 6 karakterlik şifre yaz.");
+      alert("En az 6 karakterlik şifre yaz.");
       return;
     }
 
+    setIsLoading(true);
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password,
+    });
+
+    setIsLoading(false);
+
+    if (error) {
+      alert(`Giriş yapılamadı: ${error.message}`);
+      return;
+    }
+
+    const metadataDisplayName = data.user?.user_metadata?.display_name;
     const savedDisplayName = localStorage.getItem("subjeva-display-name");
-    const displayName = savedDisplayName || createNameFromEmail(cleanEmail);
+
+    const displayName =
+      metadataDisplayName || savedDisplayName || createNameFromEmail(cleanEmail);
 
     localStorage.setItem("subjeva-demo-session", "active");
     localStorage.setItem("subjeva-demo-email", cleanEmail);
@@ -112,27 +132,26 @@ export default function LoginPage() {
           </p>
 
           <h1 className="mt-5 max-w-3xl text-5xl font-extrabold tracking-tight text-slate-950 md:text-7xl">
-            Çalışma alanına geri dön.
+            Hesabına giriş yap.
           </h1>
 
           <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
-            Bu demo giriş ekranı, gerçek üyelik sistemi gelene kadar Subjeva
-            deneyimini test etmen için çalışır. Supabase aşamasında burası
-            gerçek kullanıcı girişi olacak.
+            Bu giriş ekranı artık Supabase Auth ile çalışır. E-posta ve şifrenle
+            giriş yaptığında Subjeva çalışma alanına devam edebilirsin.
           </p>
 
           <div className="mt-8 grid gap-4 sm:grid-cols-3">
             <div className="rounded-3xl border border-orange-100 bg-white p-5 shadow-sm">
               <p className="text-3xl">🔐</p>
               <p className="mt-3 font-extrabold text-slate-950">
-                Demo oturumu aç
+                Gerçek giriş sistemi
               </p>
             </div>
 
             <div className="rounded-3xl border border-orange-100 bg-white p-5 shadow-sm">
               <p className="text-3xl">🎓</p>
               <p className="mt-3 font-extrabold text-slate-950">
-                Rolünü koru
+                Rolünü seç
               </p>
             </div>
 
@@ -157,7 +176,7 @@ export default function LoginPage() {
             <p
               className={`${caveat.className} text-4xl font-bold text-orange-600`}
             >
-              Demo giriş yap.
+              Giriş yap.
             </p>
 
             <h2 className="mt-3 text-3xl font-extrabold text-slate-950">
@@ -165,7 +184,7 @@ export default function LoginPage() {
             </h2>
 
             <p className="mt-3 text-sm leading-6 text-slate-500">
-              Bu gerçek giriş sistemi değil. Şimdilik demo oturumu başlatır.
+              Bu giriş artık Supabase Auth üzerinden kontrol edilir.
             </p>
           </div>
 
@@ -198,27 +217,32 @@ export default function LoginPage() {
               />
 
               <p className="mt-2 text-xs font-semibold text-slate-500">
-                Demo sürümde şifre kontrolü gerçek auth değildir.
+                Şifre Supabase Auth tarafından doğrulanır.
               </p>
             </div>
           </div>
 
           <motion.button
-            whileHover={{ scale: 1.02, y: -1 }}
-            whileTap={{ scale: 0.98 }}
+            whileHover={{ scale: isLoading ? 1 : 1.02, y: isLoading ? 0 : -1 }}
+            whileTap={{ scale: isLoading ? 1 : 0.98 }}
             type="submit"
-            className="mt-7 w-full rounded-2xl bg-orange-500 px-6 py-4 text-sm font-extrabold text-white shadow-lg shadow-orange-200 transition hover:bg-orange-600"
+            disabled={isLoading}
+            className={`mt-7 w-full rounded-2xl px-6 py-4 text-sm font-extrabold text-white shadow-lg shadow-orange-200 transition ${
+              isLoading
+                ? "cursor-not-allowed bg-orange-300"
+                : "bg-orange-500 hover:bg-orange-600"
+            }`}
           >
-            Giriş Yap
+            {isLoading ? "Giriş yapılıyor..." : "Giriş Yap"}
           </motion.button>
 
           <p className="mt-5 text-center text-sm font-medium text-slate-500">
-            Henüz demo hesabın yok mu?{" "}
+            Henüz hesabın yok mu?{" "}
             <a
               href="/signup"
               className="font-extrabold text-orange-600 hover:text-orange-700"
             >
-              Demo hesap oluştur
+              Hesap oluştur
             </a>
           </p>
         </motion.form>

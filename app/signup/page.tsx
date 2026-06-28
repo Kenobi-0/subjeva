@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { Caveat, Inter } from "next/font/google";
 import BrandLogo from "../../components/BrandLogo";
 import { saveSubjevaUserProfile } from "../../lib/subjevaStorage";
+import { supabase } from "../../lib/supabaseClient";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -35,7 +36,9 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  const [isLoading, setIsLoading] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const cleanDisplayName = displayName.trim();
@@ -52,7 +55,26 @@ export default function SignupPage() {
     }
 
     if (!password || password.length < 6) {
-      alert("Demo için en az 6 karakterlik bir şifre yaz.");
+      alert("En az 6 karakterlik bir şifre yaz.");
+      return;
+    }
+
+    setIsLoading(true);
+
+    const { error } = await supabase.auth.signUp({
+      email: cleanEmail,
+      password,
+      options: {
+        data: {
+          display_name: cleanDisplayName,
+        },
+      },
+    });
+
+    setIsLoading(false);
+
+    if (error) {
+      alert(`Kayıt oluşturulamadı: ${error.message}`);
       return;
     }
 
@@ -66,6 +88,8 @@ export default function SignupPage() {
     localStorage.setItem("subjeva-demo-session", "active");
     localStorage.setItem("subjeva-demo-email", cleanEmail);
     localStorage.setItem("subjeva-display-name", cleanDisplayName);
+
+    alert("Hesabın Supabase üzerinde oluşturuldu ✅");
 
     router.push("/select-role");
   }
@@ -104,12 +128,12 @@ export default function SignupPage() {
           </p>
 
           <h1 className="mt-5 max-w-3xl text-5xl font-extrabold tracking-tight text-slate-950 md:text-7xl">
-            Kendi adınla başla.
+            Gerçek hesabını oluştur.
           </h1>
 
           <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
-            Demo kayıt akışında adını kaydediyoruz. Böylece panel, profil
-            menüsü ve ayarlar alanı sana özel görünmeye başlıyor.
+            Bu adımda hesabın artık Supabase üzerinde oluşturulur. Böylece
+            Subjeva’yı gerçek kullanıcı sistemine taşımaya başlıyoruz.
           </p>
 
           <div className="mt-8 grid gap-4 sm:grid-cols-3">
@@ -121,16 +145,16 @@ export default function SignupPage() {
             </div>
 
             <div className="rounded-3xl border border-orange-100 bg-white p-5 shadow-sm">
-              <p className="text-3xl">🎓</p>
+              <p className="text-3xl">🔐</p>
               <p className="mt-3 font-extrabold text-slate-950">
-                Öğrenci rolünü seç
+                Supabase hesabı açılır
               </p>
             </div>
 
             <div className="rounded-3xl border border-orange-100 bg-white p-5 shadow-sm">
               <p className="text-3xl">📊</p>
               <p className="mt-3 font-extrabold text-slate-950">
-                Panelini oluştur
+                Panelin hazırlanır
               </p>
             </div>
           </div>
@@ -148,7 +172,7 @@ export default function SignupPage() {
             <p
               className={`${caveat.className} text-4xl font-bold text-orange-600`}
             >
-              Demo hesabını oluştur.
+              Hesabını oluştur.
             </p>
 
             <h2 className="mt-3 text-3xl font-extrabold text-slate-950">
@@ -156,8 +180,7 @@ export default function SignupPage() {
             </h2>
 
             <p className="mt-3 text-sm leading-6 text-slate-500">
-              Bu gerçek üyelik sistemi değil. Supabase aşamasında gerçek
-              kullanıcı hesabına dönüşecek.
+              Bu kayıt artık Supabase Auth üzerinden oluşturulur.
             </p>
           </div>
 
@@ -204,27 +227,32 @@ export default function SignupPage() {
               />
 
               <p className="mt-2 text-xs font-semibold text-slate-500">
-                Demo sürümde şifre kaydedilmez.
+                Şifre artık Supabase Auth tarafında tutulur.
               </p>
             </div>
           </div>
 
           <motion.button
-            whileHover={{ scale: 1.02, y: -1 }}
-            whileTap={{ scale: 0.98 }}
+            whileHover={{ scale: isLoading ? 1 : 1.02, y: isLoading ? 0 : -1 }}
+            whileTap={{ scale: isLoading ? 1 : 0.98 }}
             type="submit"
-            className="mt-7 w-full rounded-2xl bg-orange-500 px-6 py-4 text-sm font-extrabold text-white shadow-lg shadow-orange-200 transition hover:bg-orange-600"
+            disabled={isLoading}
+            className={`mt-7 w-full rounded-2xl px-6 py-4 text-sm font-extrabold text-white shadow-lg shadow-orange-200 transition ${
+              isLoading
+                ? "cursor-not-allowed bg-orange-300"
+                : "bg-orange-500 hover:bg-orange-600"
+            }`}
           >
-            Devam Et
+            {isLoading ? "Hesap oluşturuluyor..." : "Hesap Oluştur"}
           </motion.button>
 
           <p className="mt-5 text-center text-sm font-medium text-slate-500">
-            Zaten test ediyor musun?{" "}
+            Zaten hesabın var mı?{" "}
             <a
-              href="/select-role"
+              href="/login"
               className="font-extrabold text-orange-600 hover:text-orange-700"
             >
-              Rol seçimine git
+              Giriş yap
             </a>
           </p>
         </motion.form>

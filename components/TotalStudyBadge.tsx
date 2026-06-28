@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getDbTotalStudyMinutes } from "../lib/subjevaDb";
 
 type TotalStudyBadgeProps = {
   focusMode?: boolean;
@@ -13,9 +14,14 @@ export default function TotalStudyBadge({
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
-    function loadTotalMinutes() {
-      const saved = localStorage.getItem("subjeva-total-study-minutes");
-      setTotalMinutes(saved ? Number(saved) : 0);
+    async function loadTotalMinutes() {
+      try {
+        const savedTotalMinutes = await getDbTotalStudyMinutes();
+        setTotalMinutes(savedTotalMinutes);
+      } catch {
+        const localTotal = localStorage.getItem("subjeva-total-study-minutes");
+        setTotalMinutes(localTotal ? Number(localTotal) : 0);
+      }
     }
 
     function updateThemeState() {

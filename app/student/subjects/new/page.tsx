@@ -5,13 +5,7 @@ import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Caveat } from "next/font/google";
 import StudentLayout from "../../../../components/StudentLayout";
-import {
-  createId,
-  createSlug,
-  getSubjevaSubjects,
-  saveSubjevaSubjects,
-  type SubjevaSubject,
-} from "../../../../lib/subjevaStorage";
+import { createDbSubject, getDbSubjects } from "../../../../lib/subjevaDb";
 
 const caveat = Caveat({
   subsets: ["latin"],
@@ -31,26 +25,14 @@ const scrollReveal = {
   },
 };
 
-function createUniqueSlug(name: string, existingSubjects: SubjevaSubject[]) {
-  const baseSlug = createSlug(name) || "subject";
-  let nextSlug = baseSlug;
-  let counter = 2;
-
-  while (existingSubjects.some((subject) => subject.slug === nextSlug)) {
-    nextSlug = `${baseSlug}-${counter}`;
-    counter += 1;
-  }
-
-  return nextSlug;
-}
-
 export default function AddSubjectPage() {
   const router = useRouter();
 
   const [subjectName, setSubjectName] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const cleanSubjectName = subjectName.trim();
@@ -60,51 +42,45 @@ export default function AddSubjectPage() {
       return;
     }
 
-    const existingSubjects = getSubjevaSubjects();
+    try {
+      setIsSaving(true);
 
-    if (existingSubjects.length >= 8) {
-      alert("Demo sürümde en fazla 8 konu ekleyebilirsin.");
-      return;
+      const existingSubjects = await getDbSubjects();
+
+      if (existingSubjects.length >= 8) {
+        alert("Demo sürümde en fazla 8 konu ekleyebilirsin.");
+        return;
+      }
+
+      await createDbSubject(cleanSubjectName);
+
+      setSuccessMessage(`${cleanSubjectName} eklendi!`);
+      setSubjectName("");
+
+      setTimeout(() => {
+        router.push("/student/subjects");
+      }, 900);
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Konu eklenemedi: ${error.message}`
+          : "Konu eklenemedi."
+      );
+    } finally {
+      setIsSaving(false);
     }
-
-    const slug = createUniqueSlug(cleanSubjectName, existingSubjects);
-
-    const newSubject: SubjevaSubject = {
-      id: createId(),
-      slug,
-      name: cleanSubjectName,
-      description: "",
-      completedUnits: 0,
-      totalUnits: 0,
-      nextTopic: undefined,
-      studyDays: [],
-      notes: "",
-      createdAt: new Date().toISOString(),
-    };
-
-    saveSubjevaSubjects([newSubject, ...existingSubjects]);
-
-    if (!localStorage.getItem(`subjeva-subject-minutes-${slug}`)) {
-      localStorage.setItem(`subjeva-subject-minutes-${slug}`, "0");
-    }
-
-    setSuccessMessage(`${cleanSubjectName} eklendi!`);
-
-    setTimeout(() => {
-      router.push(`/student/subjects/${slug}`);
-    }, 900);
   }
 
   return (
     <StudentLayout
       activePage="Subjects"
-      topbarSubtitle="Konu Ekle · Basit konu oluşturma"
+      topbarSubtitle="Konu Ekle · Supabase kayıt"
       primaryAction={{
         label: "Konulara Dön",
         href: "/student/subjects",
       }}
       sidebarTitle="Konu ile başla."
-      sidebarDescription="Önce sadece konuyu oluştur. Sonra bu konunun içine dersler ekleyerek planını ve ilerlemeni oluştur."
+      sidebarDescription="Bu sayfada eklediğin konu artık sadece giriş yaptığın hesaba kaydedilir."
     >
       <AnimatePresence>
         {successMessage ? (
@@ -128,7 +104,7 @@ export default function AddSubjectPage() {
               </p>
 
               <p className="mt-2 text-sm font-bold text-slate-500">
-                Ders ekleme sayfasına yönlendiriliyorsun.
+                Konular sayfasına yönlendiriliyorsun.
               </p>
             </motion.div>
           </motion.div>
@@ -151,11 +127,12 @@ export default function AddSubjectPage() {
           </p>
 
           <h1 className="mx-auto mt-4 max-w-4xl text-4xl font-extrabold tracking-tight text-slate-950 md:text-6xl">
-            Önce konunun adını belirle.
+            Bu konu sadece senin hesabına kaydedilecek.
           </h1>
 
           <p className="mx-auto mt-5 max-w-2xl text-lg leading-8 text-slate-600">
-            Dersler, tarihler ve çalışma detayları bu konunun içine eklenecek.
+            Artık konu verileri localStorage yerine Supabase veritabanına
+            kaydediliyor.
           </p>
         </motion.div>
 
@@ -207,19 +184,24 @@ export default function AddSubjectPage() {
               </p>
 
               <p className="mt-2 text-sm font-semibold text-slate-500">
-                Dersler bu konunun içine eklenecek.
+                Bu konu giriş yaptığın Supabase hesabına kaydedilecek.
               </p>
             </div>
           </div>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <motion.button
-              whileHover={{ scale: 1.02, y: -1 }}
-              whileTap={{ scale: 0.98 }}
+              whileHover={{ scale: isSaving ? 1 : 1.02, y: isSaving ? 0 : -1 }}
+              whileTap={{ scale: isSaving ? 1 : 0.98 }}
               type="submit"
-              className="rounded-2xl bg-orange-500 px-6 py-3.5 text-sm font-bold text-white shadow-lg shadow-orange-200 transition hover:bg-orange-600"
+              disabled={isSaving}
+              className={`rounded-2xl px-6 py-3.5 text-sm font-bold text-white shadow-lg shadow-orange-200 transition ${
+                isSaving
+                  ? "cursor-not-allowed bg-orange-300"
+                  : "bg-orange-500 hover:bg-orange-600"
+              }`}
             >
-              Konuyu Kaydet
+              {isSaving ? "Kaydediliyor..." : "Konuyu Kaydet"}
             </motion.button>
 
             <a

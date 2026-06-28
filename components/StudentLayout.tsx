@@ -3,6 +3,7 @@
 import { ChangeEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Caveat, Inter } from "next/font/google";
+import { supabase } from "../lib/supabaseClient";
 import BrandLogo from "./BrandLogo";
 import ThemeToggle from "./ThemeToggle";
 import TotalStudyBadge from "./TotalStudyBadge";
@@ -175,19 +176,21 @@ export default function StudentLayout({
     localStorage.removeItem("subjeva-profile-image");
   }
 
-  function handleLogout() {
-    const confirmed = confirm("Çıkış yapmak istiyor musun?");
+  async function handleLogout() {
+  const confirmed = confirm("Çıkış yapmak istiyor musun?");
 
-    if (!confirmed) return;
+  if (!confirmed) return;
 
-    localStorage.removeItem("subjeva-demo-session");
-    localStorage.removeItem("subjeva-selected-role");
-    localStorage.removeItem("subjeva-demo-email");
+  await supabase.auth.signOut();
 
-    setUserMenuOpen(false);
+  localStorage.removeItem("subjeva-demo-session");
+  localStorage.removeItem("subjeva-selected-role");
+  localStorage.removeItem("subjeva-demo-email");
 
-    router.push("/");
-  }
+  setUserMenuOpen(false);
+
+  router.push("/");
+}
 
   if (isCheckingSession) {
     return (

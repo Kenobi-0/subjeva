@@ -6,14 +6,17 @@ import { Caveat } from "next/font/google";
 import StudentLayout from "../../../components/StudentLayout";
 import {
   calculateSubjectProgress,
-  getSubjevaLessons,
-  getSubjevaMainTarget,
-  getSubjevaSubjectMinutes,
-  getSubjevaSubjects,
   type SubjevaLesson,
   type SubjevaMainTarget,
   type SubjevaSubject,
 } from "../../../lib/subjevaStorage";
+import {
+  getDbLessons,
+  getDbMainTarget,
+  getDbSubjectMinutes,
+  getDbSubjects,
+} from "../../../lib/subjevaDb";
+import { supabase } from "../../../lib/supabaseClient";
 
 const caveat = Caveat({
   subsets: ["latin"],
@@ -126,12 +129,13 @@ function getLessonsForDate(lessons: SubjevaLesson[], dateKey: string) {
 export default function StudentDashboardPage() {
   const [lessons, setLessons] = useState<SubjevaLesson[]>([]);
   const [currentTime, setCurrentTime] = useState("");
-  const [displayName, setDisplayName] = useState("Kenan");
+  const [displayName, setDisplayName] = useState("Öğrenci");
   const [subjects, setSubjects] = useState<SubjevaSubject[]>([]);
   const [mainTarget, setMainTarget] = useState<SubjevaMainTarget | null>(null);
   const [subjectMinutes, setSubjectMinutes] = useState<Record<string, number>>(
     {}
   );
+  const [isLoading, setIsLoading] = useState(true);
 
   const [countdown, setCountdown] = useState({
     days: 0,
@@ -139,12 +143,52 @@ export default function StudentDashboardPage() {
     minutes: 0,
   });
 
-  useEffect(() => {
-    function loadProfileName() {
-      const savedName = localStorage.getItem("subjeva-display-name");
-      setDisplayName(savedName || "Kenan");
-    }
+  async function loadProfileName() {
+    const { data } = await supabase.auth.getUser();
 
+    const metadataDisplayName =
+      typeof data.user?.user_metadata?.display_name === "string"
+        ? data.user.user_metadata.display_name
+        : "";
+
+    const savedName = localStorage.getItem("subjeva-display-name");
+
+    setDisplayName(metadataDisplayName || savedName || "Öğrenci");
+  }
+
+  async function loadDashboardData() {
+    try {
+      setIsLoading(true);
+
+      const savedSubjects = await getDbSubjects();
+      const savedTarget = await getDbMainTarget();
+      const savedLessons = await getDbLessons();
+
+      const nextSubjectMinutes: Record<string, number> = {};
+
+      await Promise.all(
+        savedSubjects.map(async (subject) => {
+          nextSubjectMinutes[subject.id] = await getDbSubjectMinutes(subject.id);
+        })
+      );
+
+      setSubjects(savedSubjects);
+      setMainTarget(savedTarget);
+      setLessons(savedLessons);
+      setSubjectMinutes(nextSubjectMinutes);
+      setCountdown(getCountdown(savedTarget));
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Panel verileri yüklenemedi: ${error.message}`
+          : "Panel verileri yüklenemedi."
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  useEffect(() => {
     loadProfileName();
 
     window.addEventListener("storage", loadProfileName);
@@ -157,29 +201,8 @@ export default function StudentDashboardPage() {
   }, []);
 
   useEffect(() => {
-    function loadDashboardData() {
-      const savedSubjects = getSubjevaSubjects();
-      const savedTarget = getSubjevaMainTarget();
-      const savedLessons = getSubjevaLessons();
-
-      const nextSubjectMinutes: Record<string, number> = {};
-
-      savedSubjects.forEach((subject) => {
-        nextSubjectMinutes[subject.slug] = getSubjevaSubjectMinutes(
-          subject.slug
-        );
-      });
-
-      setSubjects(savedSubjects);
-      setMainTarget(savedTarget);
-      setLessons(savedLessons);
-      setSubjectMinutes(nextSubjectMinutes);
-      setCountdown(getCountdown(savedTarget));
-    }
-
     loadDashboardData();
 
-    window.addEventListener("storage", loadDashboardData);
     window.addEventListener("subjeva-data-updated", loadDashboardData);
     window.addEventListener(
       "subjeva-study-minutes-updated",
@@ -187,7 +210,6 @@ export default function StudentDashboardPage() {
     );
 
     return () => {
-      window.removeEventListener("storage", loadDashboardData);
       window.removeEventListener("subjeva-data-updated", loadDashboardData);
       window.removeEventListener(
         "subjeva-study-minutes-updated",
@@ -271,12 +293,8 @@ export default function StudentDashboardPage() {
               </p>
 
               <h1 className="mt-1 text-[clamp(3.4rem,6vw,6.2rem)] font-extrabold leading-[0.9] tracking-[-0.055em] text-slate-950">
-                  {firstName}
+                {firstName}
               </h1>
-
-              <p className="mt-7 text-lg font-extrabold text-slate-700 md:text-2xl">
-               
-              </p>
             </div>
           </div>
         </motion.div>
@@ -308,12 +326,24 @@ export default function StudentDashboardPage() {
             </a>
           </div>
 
-          {subjects.length === 0 ? (
+          {isLoading ? (
+            <div className="rounded-[30px] border border-dashed border-orange-200 bg-orange-50/40 p-10 text-center">
+              <p
+                className={`${caveat.className} text-4xl font-bold text-orange-600`}
+              >
+                Panel yükleniyor...
+              </p>
+
+              <p className="mt-3 text-sm font-semibold text-slate-500">
+                Bu hesaba ait Supabase verileri alınıyor.
+              </p>
+            </div>
+          ) : subjects.length === 0 ? (
             <div className="rounded-[30px] border border-dashed border-orange-200 bg-orange-50/40 p-10 text-center">
               <p className="text-5xl">📚</p>
 
               <h3 className="mt-4 text-2xl font-extrabold text-slate-950">
-                Henüz konu eklenmedi.
+                Bu hesapta henüz konu yok.
               </h3>
 
               <p className="mx-auto mt-3 max-w-xl leading-7 text-slate-600">
@@ -390,7 +420,7 @@ export default function StudentDashboardPage() {
                       tamamlandı
                       <span className="font-extrabold text-orange-600">
                         {" "}
-                        · {subjectMinutes[subject.slug] || 0} dk çalışıldı
+                        · {subjectMinutes[subject.id] || 0} dk çalışıldı
                       </span>
                     </p>
                   </motion.div>

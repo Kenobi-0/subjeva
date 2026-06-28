@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getDbTotalStudyMinutes } from "../lib/subjevaDb";
+import { getDbTotalStudyMinutes, getDbUserProfile } from "../lib/subjevaDb";
 
 type TotalStudyBadgeProps = {
   focusMode?: boolean;
@@ -12,15 +12,22 @@ export default function TotalStudyBadge({
 }: TotalStudyBadgeProps) {
   const [totalMinutes, setTotalMinutes] = useState(0);
   const [isDark, setIsDark] = useState(false);
+  const [showStudyBadge, setShowStudyBadge] = useState(true);
 
   useEffect(() => {
-    async function loadTotalMinutes() {
+    async function loadBadgeData() {
       try {
-        const savedTotalMinutes = await getDbTotalStudyMinutes();
+        const [savedTotalMinutes, profile] = await Promise.all([
+          getDbTotalStudyMinutes(),
+          getDbUserProfile(),
+        ]);
+
         setTotalMinutes(savedTotalMinutes);
+        setShowStudyBadge(profile.showStudyBadge);
       } catch {
         const localTotal = localStorage.getItem("subjeva-total-study-minutes");
         setTotalMinutes(localTotal ? Number(localTotal) : 0);
+        setShowStudyBadge(true);
       }
     }
 
@@ -28,7 +35,7 @@ export default function TotalStudyBadge({
       setIsDark(document.documentElement.classList.contains("dark"));
     }
 
-    loadTotalMinutes();
+    loadBadgeData();
     updateThemeState();
 
     const observer = new MutationObserver(updateThemeState);
@@ -38,20 +45,23 @@ export default function TotalStudyBadge({
       attributeFilter: ["class"],
     });
 
-    window.addEventListener("storage", loadTotalMinutes);
-    window.addEventListener("subjeva-study-minutes-updated", loadTotalMinutes);
-    window.addEventListener("subjeva-data-updated", loadTotalMinutes);
+    window.addEventListener("storage", loadBadgeData);
+    window.addEventListener("subjeva-study-minutes-updated", loadBadgeData);
+    window.addEventListener("subjeva-data-updated", loadBadgeData);
+    window.addEventListener("subjeva-profile-updated", loadBadgeData);
 
     return () => {
       observer.disconnect();
-      window.removeEventListener("storage", loadTotalMinutes);
-      window.removeEventListener(
-        "subjeva-study-minutes-updated",
-        loadTotalMinutes
-      );
-      window.removeEventListener("subjeva-data-updated", loadTotalMinutes);
+      window.removeEventListener("storage", loadBadgeData);
+      window.removeEventListener("subjeva-study-minutes-updated", loadBadgeData);
+      window.removeEventListener("subjeva-data-updated", loadBadgeData);
+      window.removeEventListener("subjeva-profile-updated", loadBadgeData);
     };
   }, []);
+
+  if (!showStudyBadge) {
+    return null;
+  }
 
   if (focusMode) {
     return (

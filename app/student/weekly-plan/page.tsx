@@ -4,10 +4,8 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Caveat } from "next/font/google";
 import StudentLayout from "../../../components/StudentLayout";
-import {
-  getSubjevaLessons,
-  type SubjevaLesson,
-} from "../../../lib/subjevaStorage";
+import { type SubjevaLesson } from "../../../lib/subjevaStorage";
+import { getDbLessons } from "../../../lib/subjevaDb";
 
 const caveat = Caveat({
   subsets: ["latin"],
@@ -83,20 +81,31 @@ export default function WeeklyPlanPage() {
   const [weekStartDate, setWeekStartDate] = useState(() =>
     getStartOfWeek(new Date())
   );
+  const [isLoading, setIsLoading] = useState(true);
+
+  async function loadWeeklyPlanData() {
+    try {
+      setIsLoading(true);
+      const savedLessons = await getDbLessons();
+      setLessons(savedLessons);
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Haftalık plan yüklenemedi: ${error.message}`
+          : "Haftalık plan yüklenemedi."
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
   useEffect(() => {
-    function loadWeeklyPlanData() {
-      setLessons(getSubjevaLessons());
-    }
-
     loadWeeklyPlanData();
 
-    window.addEventListener("storage", loadWeeklyPlanData);
     window.addEventListener("subjeva-data-updated", loadWeeklyPlanData);
     window.addEventListener("subjeva-study-minutes-updated", loadWeeklyPlanData);
 
     return () => {
-      window.removeEventListener("storage", loadWeeklyPlanData);
       window.removeEventListener("subjeva-data-updated", loadWeeklyPlanData);
       window.removeEventListener(
         "subjeva-study-minutes-updated",
@@ -147,7 +156,7 @@ export default function WeeklyPlanPage() {
   return (
     <StudentLayout
       activePage="Weekly Plan"
-      topbarSubtitle="Haftalık Plan · Otomatik ders takibi"
+      topbarSubtitle="Haftalık Plan · Supabase ders takibi"
       primaryAction={{
         label: "+ Konu Ekle",
         href: "/student/subjects/new",
@@ -175,9 +184,8 @@ export default function WeeklyPlanPage() {
           </h1>
 
           <p className="mx-auto mt-5 max-w-3xl text-lg leading-8 text-slate-600">
-            Konu detayında bir derse tarih eklediğinde, o ders bu sayfada
-            ilgili haftanın ilgili gününde otomatik görünür. Dersi tamamladığında
-            bu plandan kaybolur.
+            Bu sayfa artık sadece giriş yaptığın Supabase hesabına ait dersleri
+            gösterir. Başka hesapların dersleri burada görünmez.
           </p>
         </motion.div>
 
@@ -296,7 +304,19 @@ export default function WeeklyPlanPage() {
             </div>
           </div>
 
-          {totalLessonDates === 0 ? (
+          {isLoading ? (
+            <div className="rounded-[30px] border border-dashed border-orange-200 bg-orange-50/40 p-10 text-center">
+              <p
+                className={`${caveat.className} text-4xl font-bold text-orange-600`}
+              >
+                Haftalık plan yükleniyor...
+              </p>
+
+              <p className="mt-3 text-sm font-semibold text-slate-500">
+                Bu hesaba ait dersler Supabase üzerinden alınıyor.
+              </p>
+            </div>
+          ) : totalLessonDates === 0 ? (
             <div className="rounded-[30px] border border-dashed border-orange-200 bg-orange-50/40 p-10 text-center">
               <p className="text-5xl">🗓️</p>
 

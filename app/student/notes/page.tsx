@@ -1,9 +1,15 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { motion } from "framer-motion";
+import { useEffect, useState, type FormEvent } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Caveat } from "next/font/google";
 import StudentLayout from "../../../components/StudentLayout";
+import {
+  createDbNote,
+  deleteDbNote,
+  getDbNotes,
+  type SubjevaNote,
+} from "../../../lib/subjevaDb";
 
 const caveat = Caveat({
   subsets: ["latin"],
@@ -23,146 +29,234 @@ const scrollReveal = {
   },
 };
 
-const subjects = [
-  "Matematik",
-  "Fizik",
-  "Kimya",
-  "Biyoloji",
-  "Geometri",
-  "Problem",
-  "Genel",
-];
-
 const noteTypes = [
+  {
+    value: "all",
+    label: "Tümü",
+    icon: "📚",
+  },
   {
     value: "topic",
     label: "Konu Notu",
-    emoji: "📘",
-    color: "bg-orange-500",
-    soft: "bg-orange-50",
-    text: "text-orange-700",
+    icon: "📘",
   },
   {
     value: "mistake",
     label: "Yanlış Notu",
-    emoji: "⚠️",
-    color: "bg-rose-500",
-    soft: "bg-rose-50",
-    text: "text-rose-700",
+    icon: "⚠️",
   },
   {
     value: "review",
     label: "Tekrar Notu",
-    emoji: "🔁",
-    color: "bg-emerald-500",
-    soft: "bg-emerald-50",
-    text: "text-emerald-700",
+    icon: "🔁",
   },
   {
     value: "question",
     label: "Soru Notu",
-    emoji: "❓",
-    color: "bg-sky-500",
-    soft: "bg-sky-50",
-    text: "text-sky-700",
+    icon: "📝",
   },
 ];
 
-type Note = {
-  id: string;
-  title: string;
-  content: string;
-  subject: string;
-  type: string;
-  date: string;
-};
+function getNoteTypeLabel(value: string) {
+  return noteTypes.find((type) => type.value === value)?.label || "Not";
+}
 
-const initialNotes: Note[] = [
-  {
-    id: "1",
-    title: "Fonksiyonlar tekrar edilmeli",
-    content:
-      "Tanım kümesi ve değer kümesi kısmında karışıklık oluyor. Önce temel örnekler, sonra grafik yorumlama yapılmalı.",
-    subject: "Matematik",
-    type: "topic",
-    date: "26.06.2026",
-  },
-  {
-    id: "2",
-    title: "Kuvvet sorularında hata",
-    content:
-      "Serbest cisim diyagramını çizmeden direkt işlem yapınca yanlış çıkıyor. Her soruda önce kuvvetleri çiz.",
-    subject: "Fizik",
-    type: "mistake",
-    date: "25.06.2026",
-  },
-  {
-    id: "3",
-    title: "Haftalık deneme analizi",
-    content:
-      "Yanlışlar en çok problem ve geometri tarafında birikiyor. Pazar günü hafif tekrar planına eklenmeli.",
-    subject: "Genel",
-    type: "review",
-    date: "24.06.2026",
-  },
-];
+function getNoteTypeIcon(value: string) {
+  return noteTypes.find((type) => type.value === value)?.icon || "📝";
+}
 
-function getNoteType(type: string) {
-  return noteTypes.find((noteType) => noteType.value === type) || noteTypes[0];
+function toDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function formatDate(date: string) {
+  return new Date(`${date}T12:00:00`).toLocaleDateString("tr-TR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
 }
 
 export default function NotesPage() {
-  const [notes, setNotes] = useState<Note[]>(initialNotes);
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-  const [selectedSubject, setSelectedSubject] = useState("Matematik");
-  const [selectedType, setSelectedType] = useState("topic");
-  const [activeFilter, setActiveFilter] = useState("all");
+  const [notes, setNotes] = useState<SubjevaNote[]>([]);
+  const [selectedFilter, setSelectedFilter] = useState("all");
 
-  const filteredNotes =
-    activeFilter === "all"
-      ? notes
-      : notes.filter((note) => note.type === activeFilter);
+  const [noteTitle, setNoteTitle] = useState("");
+  const [noteSubject, setNoteSubject] = useState("");
+  const [noteType, setNoteType] = useState("topic");
+  const [noteContent, setNoteContent] = useState("");
 
-  const mistakeCount = notes.filter((note) => note.type === "mistake").length;
-  const reviewCount = notes.filter((note) => note.type === "review").length;
-  const questionCount = notes.filter((note) => note.type === "question").length;
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function loadNotes() {
+    try {
+      setIsLoading(true);
+
+      const savedNotes = await getDbNotes();
+
+      setNotes(savedNotes);
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Notlar yüklenemedi: ${error.message}`
+          : "Notlar yüklenemedi."
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadNotes();
+
+    window.addEventListener("subjeva-data-updated", loadNotes);
+
+    return () => {
+      window.removeEventListener("subjeva-data-updated", loadNotes);
+    };
+  }, []);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!title.trim() || !content.trim()) {
-      alert("Lütfen not başlığı ve not içeriği yaz.");
+    const cleanTitle = noteTitle.trim();
+    const cleanSubject = noteSubject.trim();
+    const cleanContent = noteContent.trim();
+
+    if (!cleanTitle) {
+      alert("Lütfen not başlığı yaz.");
       return;
     }
 
-    const newNote: Note = {
-      id: String(Date.now()),
-      title,
-      content,
-      subject: selectedSubject,
-      type: selectedType,
-      date: new Date().toLocaleDateString("tr-TR"),
-    };
+    if (!cleanContent) {
+      alert("Lütfen not içeriği yaz.");
+      return;
+    }
 
-    setNotes([newNote, ...notes]);
-    setTitle("");
-    setContent("");
-    setSelectedSubject("Matematik");
-    setSelectedType("topic");
+    try {
+      setIsSaving(true);
+
+      const newNote = await createDbNote({
+        title: cleanTitle,
+        content: cleanContent,
+        subject: cleanSubject || "Genel",
+        type: noteType,
+        date: toDateKey(new Date()),
+      });
+
+      setNotes([newNote, ...notes]);
+
+      setNoteTitle("");
+      setNoteSubject("");
+      setNoteType("topic");
+      setNoteContent("");
+
+      window.dispatchEvent(new Event("subjeva-data-updated"));
+
+      setSuccessMessage("Not kaydedildi ✅");
+
+      setTimeout(() => {
+        setSuccessMessage("");
+      }, 1600);
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Not kaydedilemedi: ${error.message}`
+          : "Not kaydedilemedi."
+      );
+    } finally {
+      setIsSaving(false);
+    }
   }
+
+  async function handleDeleteNote(note: SubjevaNote) {
+    const confirmed = confirm(`${note.title} notunu silmek istiyor musun?`);
+
+    if (!confirmed) return;
+
+    try {
+      await deleteDbNote(note.id);
+
+      setNotes(notes.filter((item) => item.id !== note.id));
+
+      window.dispatchEvent(new Event("subjeva-data-updated"));
+
+      setSuccessMessage("Not silindi.");
+
+      setTimeout(() => {
+        setSuccessMessage("");
+      }, 1600);
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Not silinemedi: ${error.message}`
+          : "Not silinemedi."
+      );
+    }
+  }
+
+  function clearForm() {
+    setNoteTitle("");
+    setNoteSubject("");
+    setNoteType("topic");
+    setNoteContent("");
+  }
+
+  const filteredNotes =
+    selectedFilter === "all"
+      ? notes
+      : notes.filter((note) => note.type === selectedFilter);
+
+  const topicNoteCount = notes.filter((note) => note.type === "topic").length;
+  const mistakeNoteCount = notes.filter((note) => note.type === "mistake").length;
+  const reviewNoteCount = notes.filter((note) => note.type === "review").length;
 
   return (
     <StudentLayout
       activePage="Notes"
-      topbarSubtitle="Notlar · Yanlışlar · Tekrarlar"
+      topbarSubtitle="Notlar · Supabase kayıt"
       primaryAction={{
-        label: "Odak",
-        href: "/student/focus",
+        label: "+ Konu Ekle",
+        href: "/student/subjects/new",
       }}
-      sidebarTitle="Aklında kalmasın, yaz."
-      sidebarDescription="Yanlışlarını, tekrar notlarını ve önemli konu detaylarını tek yerde topla."
+      sidebarTitle="Kendi not kütüphanen."
+      sidebarDescription="Buradaki notlar sadece giriş yaptığın Supabase hesabına aittir."
     >
+      <AnimatePresence>
+        {successMessage ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="pointer-events-none fixed inset-0 z-[999] flex items-center justify-center bg-orange-500/15 backdrop-blur-[2px]"
+          >
+            <motion.div
+              initial={{ scale: 0.8, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 10 }}
+              transition={{ type: "spring", stiffness: 220, damping: 16 }}
+              className="rounded-[34px] border border-orange-100 bg-white px-8 py-6 text-center shadow-2xl shadow-orange-200"
+            >
+              <p className="text-5xl">✍️</p>
+
+              <p className="mt-3 text-2xl font-extrabold text-orange-600">
+                {successMessage}
+              </p>
+
+              <p className="mt-2 text-sm font-bold text-slate-500">
+                Not kütüphanen güncellendi.
+              </p>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
       <div className="mx-auto max-w-7xl px-6 py-8">
         <motion.div
           variants={scrollReveal}
@@ -175,16 +269,16 @@ export default function NotesPage() {
           <p
             className={`${caveat.className} text-4xl font-bold text-orange-600`}
           >
-            Önemli olanı yakala.
+            Notlarını düzenle.
           </p>
 
           <h1 className="mx-auto mt-4 max-w-5xl text-4xl font-extrabold tracking-tight text-slate-950 md:text-6xl">
-            Çalışma notlarını düzenli tut.
+            Kendi not kütüphaneni oluştur.
           </h1>
 
           <p className="mx-auto mt-5 max-w-3xl text-lg leading-8 text-slate-600">
-            Konu notlarını, yanlışlarını, tekrar listelerini ve aklına takılan
-            soruları ders bazlı şekilde kaydet.
+            İlk girişte hazır not gösterilmez. Eklediğin her not sadece giriş
+            yaptığın hesaba kaydedilir.
           </p>
         </motion.div>
 
@@ -206,54 +300,54 @@ export default function NotesPage() {
             </p>
 
             <p className="mt-2 text-sm font-medium text-slate-500">
-              Kaydedilen çalışma notu
+              Bu hesaba ait not sayısı
             </p>
           </div>
 
           <div className="rounded-[28px] border border-orange-100 bg-white p-6 shadow-sm">
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-orange-500">
-              Yanlışlar
+              Konu Notu
+            </p>
+
+            <p className="mt-4 text-4xl font-extrabold text-orange-600">
+              {topicNoteCount}
+            </p>
+
+            <p className="mt-2 text-sm font-medium text-slate-500">
+              Konu anlatımı ve özetler
+            </p>
+          </div>
+
+          <div className="rounded-[28px] border border-orange-100 bg-white p-6 shadow-sm">
+            <p className="text-sm font-bold uppercase tracking-[0.2em] text-orange-500">
+              Yanlış Notu
             </p>
 
             <p className="mt-4 text-4xl font-extrabold text-rose-600">
-              {mistakeCount}
+              {mistakeNoteCount}
             </p>
 
             <p className="mt-2 text-sm font-medium text-slate-500">
-              Tekrar edilmesi gereken hatalar
-            </p>
-          </div>
-
-          <div className="rounded-[28px] border border-orange-100 bg-white p-6 shadow-sm">
-            <p className="text-sm font-bold uppercase tracking-[0.2em] text-orange-500">
-              Tekrarlar
-            </p>
-
-            <p className="mt-4 text-4xl font-extrabold text-emerald-600">
-              {reviewCount}
-            </p>
-
-            <p className="mt-2 text-sm font-medium text-slate-500">
-              Planlanan tekrar notları
+              Hata ve eksik takipleri
             </p>
           </div>
 
           <div className="rounded-[28px] border border-orange-100 bg-[radial-gradient(circle_at_top_left,_rgba(251,146,60,0.16),_transparent_35%),linear-gradient(135deg,_#FFFFFF,_#FFF7ED)] p-6 shadow-sm">
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-orange-500">
-              Sorular
+              Tekrar Notu
             </p>
 
-            <p className="mt-4 text-4xl font-extrabold text-sky-600">
-              {questionCount}
+            <p className="mt-4 text-4xl font-extrabold text-emerald-600">
+              {reviewNoteCount}
             </p>
 
             <p className="mt-2 text-sm font-medium text-slate-500">
-              Sonra çözülmesi gereken sorular
+              Tekrar planı notları
             </p>
           </div>
         </motion.div>
 
-        <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
+        <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
           <motion.form
             onSubmit={handleSubmit}
             variants={scrollReveal}
@@ -280,8 +374,8 @@ export default function NotesPage() {
                 </label>
 
                 <input
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
+                  value={noteTitle}
+                  onChange={(event) => setNoteTitle(event.target.value)}
                   type="text"
                   placeholder="Örnek: Fonksiyonlarda dikkat et"
                   className="w-full rounded-2xl border border-orange-100 bg-orange-50/30 px-4 py-3 text-sm font-semibold outline-none transition placeholder:text-slate-400 focus:border-orange-300 focus:bg-white focus:ring-4 focus:ring-orange-100"
@@ -294,19 +388,13 @@ export default function NotesPage() {
                     Konu
                   </label>
 
-                  <select
-                    value={selectedSubject}
-                    onChange={(event) =>
-                      setSelectedSubject(event.target.value)
-                    }
-                    className="w-full rounded-2xl border border-orange-100 bg-orange-50/30 px-4 py-3 text-sm font-bold outline-none transition focus:border-orange-300 focus:bg-white focus:ring-4 focus:ring-orange-100"
-                  >
-                    {subjects.map((subject) => (
-                      <option key={subject} value={subject}>
-                        {subject}
-                      </option>
-                    ))}
-                  </select>
+                  <input
+                    value={noteSubject}
+                    onChange={(event) => setNoteSubject(event.target.value)}
+                    type="text"
+                    placeholder="Örnek: Matematik"
+                    className="w-full rounded-2xl border border-orange-100 bg-orange-50/30 px-4 py-3 text-sm font-semibold outline-none transition placeholder:text-slate-400 focus:border-orange-300 focus:bg-white focus:ring-4 focus:ring-orange-100"
+                  />
                 </div>
 
                 <div>
@@ -315,15 +403,17 @@ export default function NotesPage() {
                   </label>
 
                   <select
-                    value={selectedType}
-                    onChange={(event) => setSelectedType(event.target.value)}
+                    value={noteType}
+                    onChange={(event) => setNoteType(event.target.value)}
                     className="w-full rounded-2xl border border-orange-100 bg-orange-50/30 px-4 py-3 text-sm font-bold outline-none transition focus:border-orange-300 focus:bg-white focus:ring-4 focus:ring-orange-100"
                   >
-                    {noteTypes.map((noteType) => (
-                      <option key={noteType.value} value={noteType.value}>
-                        {noteType.label}
-                      </option>
-                    ))}
+                    {noteTypes
+                      .filter((type) => type.value !== "all")
+                      .map((type) => (
+                        <option key={type.value} value={type.value}>
+                          {type.label}
+                        </option>
+                      ))}
                   </select>
                 </div>
               </div>
@@ -334,9 +424,9 @@ export default function NotesPage() {
                 </label>
 
                 <textarea
-                  value={content}
-                  onChange={(event) => setContent(event.target.value)}
-                  rows={7}
+                  value={noteContent}
+                  onChange={(event) => setNoteContent(event.target.value)}
+                  rows={8}
                   placeholder="Notunu buraya yaz..."
                   className="w-full resize-none rounded-2xl border border-orange-100 bg-orange-50/30 px-4 py-3 text-sm font-semibold leading-6 outline-none transition placeholder:text-slate-400 focus:border-orange-300 focus:bg-white focus:ring-4 focus:ring-orange-100"
                 />
@@ -345,29 +435,33 @@ export default function NotesPage() {
 
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
               <motion.button
-                whileHover={{ scale: 1.02, y: -1 }}
-                whileTap={{ scale: 0.98 }}
+                whileHover={{
+                  scale: isSaving ? 1 : 1.02,
+                  y: isSaving ? 0 : -1,
+                }}
+                whileTap={{ scale: isSaving ? 1 : 0.98 }}
                 type="submit"
-                className="rounded-2xl bg-orange-500 px-6 py-3.5 text-sm font-bold text-white shadow-lg shadow-orange-200 transition hover:bg-orange-600"
+                disabled={isSaving}
+                className={`rounded-2xl px-6 py-3.5 text-sm font-bold text-white shadow-lg shadow-orange-200 transition ${
+                  isSaving
+                    ? "cursor-not-allowed bg-orange-300"
+                    : "bg-orange-500 hover:bg-orange-600"
+                }`}
               >
-                Notu Kaydet
+                {isSaving ? "Kaydediliyor..." : "Notu Kaydet"}
               </motion.button>
 
               <button
                 type="button"
-                onClick={() => {
-                  setTitle("");
-                  setContent("");
-                }}
-                className="rounded-2xl border border-orange-100 bg-white px-6 py-3.5 text-sm font-bold text-slate-700 shadow-sm transition hover:border-orange-200 hover:text-orange-600"
+                onClick={clearForm}
+                className="rounded-2xl border border-orange-100 bg-white px-6 py-3.5 text-center text-sm font-bold text-slate-700 shadow-sm transition hover:border-orange-200 hover:text-orange-600"
               >
                 Temizle
               </button>
             </div>
 
             <p className="mt-4 text-sm font-medium leading-6 text-slate-500">
-              Demo sürüm: Bu notlar şimdilik sadece sayfa içinde tutulur.
-              Supabase bağlantısından sonra kalıcı hale gelecek.
+              Bu not Supabase içinde sadece giriş yaptığın hesaba kaydedilir.
             </p>
           </motion.form>
 
@@ -379,7 +473,7 @@ export default function NotesPage() {
             transition={{ duration: 0.75, ease: "easeOut" }}
             className="rounded-[34px] border border-orange-100 bg-white p-6 shadow-sm"
           >
-            <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-center">
+            <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-start">
               <div>
                 <p className="text-sm font-bold uppercase tracking-[0.2em] text-orange-500">
                   Not Kütüphanesi
@@ -391,97 +485,103 @@ export default function NotesPage() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => setActiveFilter("all")}
-                  className={`rounded-full px-4 py-2 text-xs font-extrabold transition ${
-                    activeFilter === "all"
-                      ? "bg-orange-500 text-white shadow-lg shadow-orange-200"
-                      : "bg-orange-50 text-orange-700 ring-1 ring-orange-100 hover:bg-orange-100"
-                  }`}
-                >
-                  Tümü
-                </button>
-
-                {noteTypes.map((noteType) => (
+                {noteTypes.map((type) => (
                   <button
-                    key={noteType.value}
-                    onClick={() => setActiveFilter(noteType.value)}
-                    className={`rounded-full px-4 py-2 text-xs font-extrabold transition ${
-                      activeFilter === noteType.value
-                        ? "bg-orange-500 text-white shadow-lg shadow-orange-200"
-                        : "bg-orange-50 text-orange-700 ring-1 ring-orange-100 hover:bg-orange-100"
+                    key={type.value}
+                    type="button"
+                    onClick={() => setSelectedFilter(type.value)}
+                    className={`rounded-2xl px-4 py-2.5 text-sm font-extrabold transition ${
+                      selectedFilter === type.value
+                        ? "bg-orange-500 text-white shadow-lg shadow-orange-100"
+                        : "border border-orange-100 bg-orange-50/50 text-orange-700 hover:border-orange-200 hover:bg-white"
                     }`}
                   >
-                    {noteType.label}
+                    {type.label}
                   </button>
                 ))}
               </div>
             </div>
 
-            <div className="space-y-4">
-              {filteredNotes.length > 0 ? (
-                filteredNotes.map((note, index) => {
-                  const noteType = getNoteType(note.type);
+            {isLoading ? (
+              <div className="rounded-[30px] border border-dashed border-orange-200 bg-orange-50/40 p-10 text-center">
+                <p
+                  className={`${caveat.className} text-4xl font-bold text-orange-600`}
+                >
+                  Notlar yükleniyor...
+                </p>
 
-                  return (
-                    <motion.article
-                      key={note.id}
-                      variants={scrollReveal}
-                      initial="hidden"
-                      whileInView="visible"
-                      viewport={{ once: false, amount: 0.2 }}
-                      whileHover={{ y: -5, scale: 1.005 }}
-                      transition={{
-                        duration: 0.45,
-                        delay: index * 0.04,
-                        ease: "easeOut",
-                      }}
-                      className="rounded-[28px] border border-orange-100 bg-orange-50/30 p-5 shadow-sm transition hover:border-orange-200 hover:bg-white hover:shadow-lg"
-                    >
-                      <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-start">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span
-                              className={`rounded-full ${noteType.soft} px-3 py-1.5 text-xs font-extrabold ${noteType.text} ring-1 ring-orange-100`}
-                            >
-                              {noteType.emoji} {noteType.label}
-                            </span>
+                <p className="mt-3 text-sm font-semibold text-slate-500">
+                  Bu hesaba ait notlar Supabase’den alınıyor.
+                </p>
+              </div>
+            ) : filteredNotes.length === 0 ? (
+              <div className="rounded-[30px] border border-dashed border-orange-200 bg-orange-50/40 p-10 text-center">
+                <p className="text-5xl">✍️</p>
 
-                            <span className="rounded-full bg-white px-3 py-1.5 text-xs font-extrabold text-slate-500 ring-1 ring-orange-100">
-                              {note.subject}
-                            </span>
-                          </div>
+                <h3 className="mt-4 text-2xl font-extrabold text-slate-950">
+                  Henüz not yok.
+                </h3>
 
-                          <h3 className="mt-4 text-xl font-extrabold text-slate-950">
-                            {note.title}
-                          </h3>
-                        </div>
+                <p className="mx-auto mt-3 max-w-xl leading-7 text-slate-600">
+                  İlk notunu eklediğinde burada görünecek. Hazır demo notlar
+                  artık gösterilmez.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {filteredNotes.map((note, index) => (
+                  <motion.article
+                    key={note.id}
+                    variants={scrollReveal}
+                    initial="hidden"
+                    whileInView="visible"
+                    viewport={{ once: false, amount: 0.2 }}
+                    whileHover={{ y: -5, scale: 1.005 }}
+                    transition={{
+                      duration: 0.45,
+                      delay: index * 0.04,
+                      ease: "easeOut",
+                    }}
+                    className="rounded-[28px] border border-orange-100 bg-orange-50/20 p-5 shadow-sm transition hover:bg-white"
+                  >
+                    <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-start">
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-full bg-white px-3 py-1.5 text-xs font-extrabold text-orange-600 ring-1 ring-orange-100">
+                          {getNoteTypeIcon(note.type)}{" "}
+                          {getNoteTypeLabel(note.type)}
+                        </span>
 
-                        <p className="text-sm font-bold text-slate-400">
-                          {note.date}
-                        </p>
+                        <span className="rounded-full bg-white px-3 py-1.5 text-xs font-extrabold text-slate-600 ring-1 ring-orange-100">
+                          {note.subject || "Genel"}
+                        </span>
                       </div>
 
-                      <p className="leading-7 text-slate-600">
-                        {note.content}
-                      </p>
-                    </motion.article>
-                  );
-                })
-              ) : (
-                <div className="rounded-[28px] border border-orange-100 bg-orange-50/40 p-8 text-center">
-                  <p
-                    className={`${caveat.className} text-3xl font-bold text-orange-600`}
-                  >
-                    Burada henüz not yok.
-                  </p>
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-extrabold text-slate-400">
+                          {formatDate(note.date)}
+                        </span>
 
-                  <p className="mt-2 text-sm font-semibold text-slate-500">
-                    Bu filtrede henüz not bulunmuyor.
-                  </p>
-                </div>
-              )}
-            </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteNote(note)}
+                          className="rounded-xl border border-rose-100 bg-white px-3 py-2 text-xs font-extrabold text-rose-600 transition hover:border-rose-200 hover:bg-rose-50"
+                        >
+                          Sil
+                        </button>
+                      </div>
+                    </div>
+
+                    <h3 className="text-2xl font-extrabold text-slate-950">
+                      {note.title}
+                    </h3>
+
+                    <p className="mt-3 whitespace-pre-line leading-7 text-slate-600">
+                      {note.content}
+                    </p>
+                  </motion.article>
+                ))}
+              </div>
+            )}
           </motion.section>
         </div>
       </div>

@@ -504,3 +504,96 @@ export async function removeDbMainTarget() {
     throw new Error(error.message);
   }
 }
+
+
+export type SubjevaNote = {
+  id: string;
+  title: string;
+  content: string;
+  subject: string;
+  type: string;
+  date: string;
+  createdAt: string;
+};
+
+type NoteRow = {
+  id: string;
+  user_id: string;
+  title: string;
+  content: string;
+  subject: string;
+  type: string;
+  date: string;
+  created_at: string;
+};
+
+function mapNoteFromDb(row: NoteRow): SubjevaNote {
+  return {
+    id: row.id,
+    title: row.title,
+    content: row.content,
+    subject: row.subject,
+    type: row.type,
+    date: row.date,
+    createdAt: row.created_at,
+  };
+}
+
+export async function getDbNotes() {
+  const userId = await getCurrentUserId();
+
+  const { data, error } = await supabase
+    .from("subjeva_notes")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return ((data || []) as NoteRow[]).map(mapNoteFromDb);
+}
+
+export async function createDbNote(note: {
+  title: string;
+  content: string;
+  subject: string;
+  type: string;
+  date: string;
+}) {
+  const userId = await getCurrentUserId();
+
+  const { data, error } = await supabase
+    .from("subjeva_notes")
+    .insert({
+      user_id: userId,
+      title: note.title,
+      content: note.content,
+      subject: note.subject,
+      type: note.type,
+      date: note.date,
+    })
+    .select("*")
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return mapNoteFromDb(data as NoteRow);
+}
+
+export async function deleteDbNote(noteId: string) {
+  const userId = await getCurrentUserId();
+
+  const { error } = await supabase
+    .from("subjeva_notes")
+    .delete()
+    .eq("id", noteId)
+    .eq("user_id", userId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}

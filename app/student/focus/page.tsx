@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Caveat } from "next/font/google";
 import StudentLayout from "../../../components/StudentLayout";
@@ -10,11 +10,23 @@ import {
   getDbTotalStudyMinutes,
   updateDbTotalStudyMinutes,
 } from "../../../lib/subjevaDb";
+import { supabase } from "../../../lib/supabaseClient";
 
 const caveat = Caveat({
   subsets: ["latin"],
   weight: ["600", "700"],
 });
+
+const FOCUS_SESSION_KEY = "subjeva-active-focus-session-v2";
+
+type FocusSession = {
+  userId: string;
+  sessionMinutes: number;
+  startedAt: number | null;
+  pausedElapsedSeconds: number;
+  countedMinutes: number;
+  isRunning: boolean;
+};
 
 function formatTime(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
@@ -32,16 +44,75 @@ function clampMinutes(value: number) {
   return Math.min(Math.max(value, 1), 180);
 }
 
+function createEmptySession(userId: string): FocusSession {
+  return {
+    userId,
+    sessionMinutes: 25,
+    startedAt: null,
+    pausedElapsedSeconds: 0,
+    countedMinutes: 0,
+    isRunning: false,
+  };
+}
+
+function readFocusSession(userId: string) {
+  try {
+    const saved = localStorage.getItem(FOCUS_SESSION_KEY);
+
+    if (!saved) return null;
+
+    const parsed = JSON.parse(saved) as FocusSession;
+
+    if (parsed.userId !== userId) return null;
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveFocusSession(session: FocusSession) {
+  localStorage.setItem(FOCUS_SESSION_KEY, JSON.stringify(session));
+}
+
+function clearFocusSession() {
+  localStorage.removeItem(FOCUS_SESSION_KEY);
+}
+
+function getTotalSeconds(session: FocusSession) {
+  return session.sessionMinutes * 60;
+}
+
+function calculateElapsedSeconds(session: FocusSession) {
+  const totalSeconds = getTotalSeconds(session);
+
+  if (!session.isRunning || !session.startedAt) {
+    return Math.min(session.pausedElapsedSeconds, totalSeconds);
+  }
+
+  const realElapsedSeconds = Math.floor((Date.now() - session.startedAt) / 1000);
+
+  return Math.min(
+    session.pausedElapsedSeconds + realElapsedSeconds,
+    totalSeconds
+  );
+}
+
 export default function FocusPage() {
-  const [sessionMinutes, setSessionMinutes] = useState(25);
-  const [timeLeft, setTimeLeft] = useState(25 * 60);
-  const [isRunning, setIsRunning] = useState(false);
+  const sessionRef = useRef<FocusSession | null>(null);
+  const isSyncingRef = useRef(false);
+
+  const [session, setSession] = useState<FocusSession | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   const [todayFocusMinutes, setTodayFocusMinutes] = useState(0);
   const [totalFocusMinutes, setTotalFocusMinutes] = useState(0);
 
-  const [countedMinutesInCurrentRun, setCountedMinutesInCurrentRun] =
-    useState(0);
+  function updateSession(nextSession: FocusSession) {
+    sessionRef.current = nextSession;
+    setSession(nextSession);
+    saveFocusSession(nextSession);
+  }
 
   async function loadFocusStats() {
     try {
@@ -58,8 +129,109 @@ export default function FocusPage() {
     }
   }
 
+  async function syncMissingMinutes(nextElapsedSeconds: number) {
+    const currentSession = sessionRef.current;
+
+    if (!currentSession) return;
+    if (isSyncingRef.current) return;
+
+    const nextWholeMinutes = Math.floor(nextElapsedSeconds / 60);
+
+    if (nextWholeMinutes <= currentSession.countedMinutes) return;
+
+    const diff = nextWholeMinutes - currentSession.countedMinutes;
+
+    try {
+      isSyncingRef.current = true;
+
+      const nextFocusTotals = await addDbFocusMinutes(diff);
+
+      const currentTotalStudyMinutes = await getDbTotalStudyMinutes();
+      const nextTotalStudyMinutes = currentTotalStudyMinutes + diff;
+
+      await updateDbTotalStudyMinutes(nextTotalStudyMinutes);
+
+      const latestSession = sessionRef.current || currentSession;
+
+      updateSession({
+        ...latestSession,
+        countedMinutes: nextWholeMinutes,
+      });
+
+      setTodayFocusMinutes(nextFocusTotals.todayFocusMinutes);
+      setTotalFocusMinutes(nextFocusTotals.totalFocusMinutes);
+
+      window.dispatchEvent(new Event("subjeva-study-minutes-updated"));
+      window.dispatchEvent(new Event("subjeva-data-updated"));
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Odak süresi kaydedilemedi: ${error.message}`
+          : "Odak süresi kaydedilemedi."
+      );
+    } finally {
+      isSyncingRef.current = false;
+    }
+  }
+
+  function refreshFromRealClock() {
+    const currentSession = sessionRef.current;
+
+    if (!currentSession) return;
+
+    const nextElapsedSeconds = calculateElapsedSeconds(currentSession);
+    const totalSeconds = getTotalSeconds(currentSession);
+
+    setElapsedSeconds(nextElapsedSeconds);
+
+    syncMissingMinutes(nextElapsedSeconds);
+
+    if (currentSession.isRunning && nextElapsedSeconds >= totalSeconds) {
+      updateSession({
+        ...currentSession,
+        startedAt: null,
+        pausedElapsedSeconds: totalSeconds,
+        isRunning: false,
+      });
+    }
+  }
+
   useEffect(() => {
-    loadFocusStats();
+    async function initializeFocusPage() {
+      const { data, error } = await supabase.auth.getUser();
+
+      if (error || !data.user) {
+        alert("Oturum bulunamadı. Lütfen tekrar giriş yap.");
+        return;
+      }
+
+      await loadFocusStats();
+
+      const userId = data.user.id;
+      const savedSession = readFocusSession(userId);
+      const initialSession = savedSession || createEmptySession(userId);
+
+      sessionRef.current = initialSession;
+      setSession(initialSession);
+
+      const nextElapsedSeconds = calculateElapsedSeconds(initialSession);
+      const totalSeconds = getTotalSeconds(initialSession);
+
+      setElapsedSeconds(nextElapsedSeconds);
+
+      if (initialSession.isRunning && nextElapsedSeconds >= totalSeconds) {
+        updateSession({
+          ...initialSession,
+          startedAt: null,
+          pausedElapsedSeconds: totalSeconds,
+          isRunning: false,
+        });
+      }
+
+      await syncMissingMinutes(nextElapsedSeconds);
+    }
+
+    initializeFocusPage();
 
     window.addEventListener("subjeva-study-minutes-updated", loadFocusStats);
     window.addEventListener("subjeva-data-updated", loadFocusStats);
@@ -71,91 +243,114 @@ export default function FocusPage() {
   }, []);
 
   useEffect(() => {
-    if (!isRunning) return;
+    if (!session?.isRunning) return;
 
-    const interval = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          setIsRunning(false);
-          return 0;
-        }
+    refreshFromRealClock();
 
-        return prev - 1;
-      });
-    }, 1000);
+    const interval = setInterval(refreshFromRealClock, 1000);
 
-    return () => clearInterval(interval);
-  }, [isRunning]);
+    window.addEventListener("focus", refreshFromRealClock);
+    window.addEventListener("pageshow", refreshFromRealClock);
+    document.addEventListener("visibilitychange", refreshFromRealClock);
 
-  const elapsedSeconds = sessionMinutes * 60 - timeLeft;
-  const elapsedWholeMinutes = Math.floor(elapsedSeconds / 60);
-
-  useEffect(() => {
-    if (!isRunning) return;
-
-    if (elapsedWholeMinutes > countedMinutesInCurrentRun) {
-      const diff = elapsedWholeMinutes - countedMinutesInCurrentRun;
-
-      setCountedMinutesInCurrentRun(elapsedWholeMinutes);
-
-      async function saveFocusMinute() {
-        try {
-          const nextFocusTotals = await addDbFocusMinutes(diff);
-
-          const currentTotalStudyMinutes = await getDbTotalStudyMinutes();
-          const nextTotalStudyMinutes = currentTotalStudyMinutes + diff;
-
-          await updateDbTotalStudyMinutes(nextTotalStudyMinutes);
-
-          setTodayFocusMinutes(nextFocusTotals.todayFocusMinutes);
-          setTotalFocusMinutes(nextFocusTotals.totalFocusMinutes);
-
-          window.dispatchEvent(new Event("subjeva-study-minutes-updated"));
-          window.dispatchEvent(new Event("subjeva-data-updated"));
-        } catch (error) {
-          alert(
-            error instanceof Error
-              ? `Odak süresi kaydedilemedi: ${error.message}`
-              : "Odak süresi kaydedilemedi."
-          );
-        }
-      }
-
-      saveFocusMinute();
-    }
-  }, [elapsedWholeMinutes, countedMinutesInCurrentRun, isRunning]);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", refreshFromRealClock);
+      window.removeEventListener("pageshow", refreshFromRealClock);
+      document.removeEventListener("visibilitychange", refreshFromRealClock);
+    };
+  }, [session?.isRunning]);
 
   function handleStartPause() {
-    if (timeLeft === 0) {
-      setTimeLeft(sessionMinutes * 60);
-      setCountedMinutesInCurrentRun(0);
+    const currentSession = sessionRef.current;
+
+    if (!currentSession) {
+      alert("Oturum bulunamadı. Lütfen tekrar giriş yap.");
+      return;
     }
 
-    setIsRunning((prev) => !prev);
+    const currentElapsedSeconds = calculateElapsedSeconds(currentSession);
+    const totalSeconds = getTotalSeconds(currentSession);
+
+    setElapsedSeconds(currentElapsedSeconds);
+
+    if (currentSession.isRunning) {
+      updateSession({
+        ...currentSession,
+        startedAt: null,
+        pausedElapsedSeconds: currentElapsedSeconds,
+        isRunning: false,
+      });
+
+      return;
+    }
+
+    const shouldStartNewSession = currentElapsedSeconds >= totalSeconds;
+
+    const nextSession: FocusSession = {
+      ...currentSession,
+      startedAt: Date.now(),
+      pausedElapsedSeconds: shouldStartNewSession ? 0 : currentElapsedSeconds,
+      countedMinutes: shouldStartNewSession ? 0 : currentSession.countedMinutes,
+      isRunning: true,
+    };
+
+    setElapsedSeconds(shouldStartNewSession ? 0 : currentElapsedSeconds);
+    updateSession(nextSession);
   }
 
   function handleReset() {
-    setIsRunning(false);
-    setTimeLeft(sessionMinutes * 60);
-    setCountedMinutesInCurrentRun(0);
+    const currentSession = sessionRef.current;
+
+    if (!currentSession) return;
+
+    const nextSession: FocusSession = {
+      ...currentSession,
+      startedAt: null,
+      pausedElapsedSeconds: 0,
+      countedMinutes: 0,
+      isRunning: false,
+    };
+
+    setElapsedSeconds(0);
+    updateSession(nextSession);
+    clearFocusSession();
+    sessionRef.current = nextSession;
+    setSession(nextSession);
   }
 
   function handleSessionMinutesChange(value: number) {
+    const currentSession = sessionRef.current;
+
+    if (!currentSession) return;
+
     const nextMinutes = clampMinutes(value);
 
-    setIsRunning(false);
-    setSessionMinutes(nextMinutes);
-    setTimeLeft(nextMinutes * 60);
-    setCountedMinutesInCurrentRun(0);
+    const nextSession: FocusSession = {
+      ...currentSession,
+      sessionMinutes: nextMinutes,
+      startedAt: null,
+      pausedElapsedSeconds: 0,
+      countedMinutes: 0,
+      isRunning: false,
+    };
+
+    setElapsedSeconds(0);
+    updateSession(nextSession);
   }
+
+  const sessionMinutes = session?.sessionMinutes || 25;
+  const isRunning = Boolean(session?.isRunning);
+
+  const timeLeft = Math.max(sessionMinutes * 60 - elapsedSeconds, 0);
 
   const progress = useMemo(() => {
     const total = sessionMinutes * 60;
 
     if (total === 0) return 0;
 
-    return ((total - timeLeft) / total) * 100;
-  }, [sessionMinutes, timeLeft]);
+    return (elapsedSeconds / total) * 100;
+  }, [sessionMinutes, elapsedSeconds]);
 
   const ringStyle = {
     background: `conic-gradient(#2DD4BF ${progress}%, #1F2937 ${progress}% 100%)`,
@@ -165,13 +360,13 @@ export default function FocusPage() {
     <StudentLayout
       activePage="Focus"
       focusMode
-      topbarSubtitle="Odak zamanlayıcı · Supabase süre takibi"
+      topbarSubtitle="Odak zamanlayıcı · gerçek zaman takibi"
       primaryAction={{
         label: "+ Konu Ekle",
         href: "/student/subjects/new",
       }}
       sidebarTitle="Sakin odak modu."
-      sidebarDescription="Odak sürelerin artık sadece giriş yaptığın Supabase hesabına kaydedilir."
+      sidebarDescription="Sayaç artık gerçek başlangıç saatine göre çalışır. Sekme arka planda kalsa bile süre hesaplanır."
     >
       <div className="min-h-[calc(100vh-81px)] bg-[#0B1220] px-6 py-10 text-[#EAF2FF]">
         <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
@@ -198,8 +393,8 @@ export default function FocusPage() {
             </h1>
 
             <p className="mx-auto mt-4 max-w-2xl text-lg leading-8 text-[#9FB2C8]">
-              Odak süren artık Supabase’e kaydedilir. Bu yüzden her kullanıcı
-              sadece kendi odak istatistiklerini görür.
+              Seansı başlattıktan sonra başka sekmeye geçsen bile Subjeva geçen
+              gerçek süreyi hesaplar ve odak dakikalarını hesabına ekler.
             </p>
           </motion.div>
 
@@ -216,7 +411,7 @@ export default function FocusPage() {
                 </p>
 
                 <h2 className="mt-2 text-3xl font-extrabold text-[#F8FAFC]">
-                  Odak Zamanlayıcı
+                  Gerçek zamanlı sayaç
                 </h2>
               </div>
 

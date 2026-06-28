@@ -4,25 +4,17 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Caveat } from "next/font/google";
 import StudentLayout from "../../../components/StudentLayout";
+import {
+  addDbFocusMinutes,
+  getDbStudyTotals,
+  getDbTotalStudyMinutes,
+  updateDbTotalStudyMinutes,
+} from "../../../lib/subjevaDb";
 
 const caveat = Caveat({
   subsets: ["latin"],
   weight: ["600", "700"],
 });
-
-const TODAY_FOCUS_KEY = "subjeva-focus-today-minutes";
-const TODAY_FOCUS_DATE_KEY = "subjeva-focus-today-date";
-const TOTAL_FOCUS_KEY = "subjeva-focus-total-minutes";
-const GLOBAL_TOTAL_STUDY_KEY = "subjeva-total-study-minutes";
-
-function getTodayKey() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-}
 
 function formatTime(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
@@ -51,27 +43,31 @@ export default function FocusPage() {
   const [countedMinutesInCurrentRun, setCountedMinutesInCurrentRun] =
     useState(0);
 
-  useEffect(() => {
-    const savedTodayKey = localStorage.getItem(TODAY_FOCUS_DATE_KEY);
-    const todayKey = getTodayKey();
+  async function loadFocusStats() {
+    try {
+      const totals = await getDbStudyTotals();
 
-    if (savedTodayKey !== todayKey) {
-      localStorage.setItem(TODAY_FOCUS_DATE_KEY, todayKey);
-      localStorage.setItem(TODAY_FOCUS_KEY, "0");
-      setTodayFocusMinutes(0);
-    } else {
-      const savedTodayMinutes = Number(
-        localStorage.getItem(TODAY_FOCUS_KEY) || "0"
+      setTodayFocusMinutes(totals.todayFocusMinutes);
+      setTotalFocusMinutes(totals.totalFocusMinutes);
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Odak süreleri yüklenemedi: ${error.message}`
+          : "Odak süreleri yüklenemedi."
       );
-
-      setTodayFocusMinutes(savedTodayMinutes);
     }
+  }
 
-    const savedTotalMinutes = Number(
-      localStorage.getItem(TOTAL_FOCUS_KEY) || "0"
-    );
+  useEffect(() => {
+    loadFocusStats();
 
-    setTotalFocusMinutes(savedTotalMinutes);
+    window.addEventListener("subjeva-study-minutes-updated", loadFocusStats);
+    window.addEventListener("subjeva-data-updated", loadFocusStats);
+
+    return () => {
+      window.removeEventListener("subjeva-study-minutes-updated", loadFocusStats);
+      window.removeEventListener("subjeva-data-updated", loadFocusStats);
+    };
   }, []);
 
   useEffect(() => {
@@ -100,35 +96,32 @@ export default function FocusPage() {
     if (elapsedWholeMinutes > countedMinutesInCurrentRun) {
       const diff = elapsedWholeMinutes - countedMinutesInCurrentRun;
 
-      setTodayFocusMinutes((prev) => {
-        const next = prev + diff;
-
-        localStorage.setItem(TODAY_FOCUS_KEY, String(next));
-        localStorage.setItem(TODAY_FOCUS_DATE_KEY, getTodayKey());
-
-        return next;
-      });
-
-      setTotalFocusMinutes((prev) => {
-        const next = prev + diff;
-
-        localStorage.setItem(TOTAL_FOCUS_KEY, String(next));
-
-        return next;
-      });
-
-      const currentGlobalTotal = Number(
-        localStorage.getItem(GLOBAL_TOTAL_STUDY_KEY) || "0"
-      );
-
-      const nextGlobalTotal = currentGlobalTotal + diff;
-
-      localStorage.setItem(GLOBAL_TOTAL_STUDY_KEY, String(nextGlobalTotal));
-
-      window.dispatchEvent(new Event("subjeva-study-minutes-updated"));
-      window.dispatchEvent(new Event("subjeva-data-updated"));
-
       setCountedMinutesInCurrentRun(elapsedWholeMinutes);
+
+      async function saveFocusMinute() {
+        try {
+          const nextFocusTotals = await addDbFocusMinutes(diff);
+
+          const currentTotalStudyMinutes = await getDbTotalStudyMinutes();
+          const nextTotalStudyMinutes = currentTotalStudyMinutes + diff;
+
+          await updateDbTotalStudyMinutes(nextTotalStudyMinutes);
+
+          setTodayFocusMinutes(nextFocusTotals.todayFocusMinutes);
+          setTotalFocusMinutes(nextFocusTotals.totalFocusMinutes);
+
+          window.dispatchEvent(new Event("subjeva-study-minutes-updated"));
+          window.dispatchEvent(new Event("subjeva-data-updated"));
+        } catch (error) {
+          alert(
+            error instanceof Error
+              ? `Odak süresi kaydedilemedi: ${error.message}`
+              : "Odak süresi kaydedilemedi."
+          );
+        }
+      }
+
+      saveFocusMinute();
     }
   }, [elapsedWholeMinutes, countedMinutesInCurrentRun, isRunning]);
 
@@ -172,13 +165,13 @@ export default function FocusPage() {
     <StudentLayout
       activePage="Focus"
       focusMode
-      topbarSubtitle="Odak zamanlayıcı · sakin odak modu"
+      topbarSubtitle="Odak zamanlayıcı · Supabase süre takibi"
       primaryAction={{
         label: "+ Konu Ekle",
         href: "/student/subjects/new",
       }}
       sidebarTitle="Sakin odak modu."
-      sidebarDescription="Odak sayfası özel koyu odak paletiyle çalışır. Aydınlık mod ve karanlık mod fark etmez."
+      sidebarDescription="Odak sürelerin artık sadece giriş yaptığın Supabase hesabına kaydedilir."
     >
       <div className="min-h-[calc(100vh-81px)] bg-[#0B1220] px-6 py-10 text-[#EAF2FF]">
         <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
@@ -205,8 +198,8 @@ export default function FocusPage() {
             </h1>
 
             <p className="mx-auto mt-4 max-w-2xl text-lg leading-8 text-[#9FB2C8]">
-              Daha az parlaklık, daha sakin renkler ve sadece odaklanman
-              gereken zamanlayıcı.
+              Odak süren artık Supabase’e kaydedilir. Bu yüzden her kullanıcı
+              sadece kendi odak istatistiklerini görür.
             </p>
           </motion.div>
 

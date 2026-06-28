@@ -597,3 +597,86 @@ export async function deleteDbNote(noteId: string) {
     throw new Error(error.message);
   }
 }
+
+export type SubjevaStudyTotals = {
+  totalMinutes: number;
+  todayFocusMinutes: number;
+  todayFocusDate: string | null;
+  totalFocusMinutes: number;
+};
+
+function getTodayKey() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+export async function getDbStudyTotals(): Promise<SubjevaStudyTotals> {
+  const userId = await getCurrentUserId();
+
+  const { data, error } = await supabase
+    .from("subjeva_study_totals")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data) {
+    return {
+      totalMinutes: 0,
+      todayFocusMinutes: 0,
+      todayFocusDate: getTodayKey(),
+      totalFocusMinutes: 0,
+    };
+  }
+
+  const todayKey = getTodayKey();
+  const savedTodayFocusDate = data.today_focus_date;
+
+  return {
+    totalMinutes: Number(data.total_minutes || 0),
+    todayFocusMinutes:
+      savedTodayFocusDate === todayKey
+        ? Number(data.today_focus_minutes || 0)
+        : 0,
+    todayFocusDate: savedTodayFocusDate || todayKey,
+    totalFocusMinutes: Number(data.total_focus_minutes || 0),
+  };
+}
+
+export async function addDbFocusMinutes(minutes: number) {
+  const userId = await getCurrentUserId();
+  const todayKey = getTodayKey();
+  const currentTotals = await getDbStudyTotals();
+
+  const nextTodayFocusMinutes =
+    currentTotals.todayFocusDate === todayKey
+      ? currentTotals.todayFocusMinutes + minutes
+      : minutes;
+
+  const nextTotalFocusMinutes = currentTotals.totalFocusMinutes + minutes;
+
+  const { error } = await supabase.from("subjeva_study_totals").upsert({
+    user_id: userId,
+    total_minutes: currentTotals.totalMinutes,
+    today_focus_minutes: nextTodayFocusMinutes,
+    today_focus_date: todayKey,
+    total_focus_minutes: nextTotalFocusMinutes,
+    updated_at: new Date().toISOString(),
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return {
+    todayFocusMinutes: nextTodayFocusMinutes,
+    totalFocusMinutes: nextTotalFocusMinutes,
+  };
+}

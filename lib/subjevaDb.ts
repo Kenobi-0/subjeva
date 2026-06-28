@@ -465,22 +465,32 @@ export async function getDbMainTarget() {
   return mapMainTargetFromDb(data as MainTargetRow);
 }
 
-export async function saveDbMainTarget(target: Omit<SubjevaMainTarget, "id" | "createdAt">) {
+export async function saveDbMainTarget(
+  target: Omit<SubjevaMainTarget, "id" | "createdAt">
+) {
   const userId = await getCurrentUserId();
 
-  const { error } = await supabase.from("subjeva_main_targets").upsert({
-    user_id: userId,
-    name: target.name,
-    date: target.date,
-    time: target.time,
-    description: target.description,
-    updated_at: new Date().toISOString(),
-  });
+  const { error } = await supabase
+    .from("subjeva_main_targets")
+    .upsert(
+      {
+        user_id: userId,
+        name: target.name,
+        date: target.date,
+        time: target.time,
+        description: target.description,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: "user_id",
+      }
+    );
 
   if (error) {
     throw new Error(error.message);
   }
 }
+
 
 export async function removeDbMainTarget() {
   const userId = await getCurrentUserId();

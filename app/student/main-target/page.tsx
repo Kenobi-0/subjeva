@@ -6,12 +6,11 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Caveat } from "next/font/google";
 import StudentLayout from "../../../components/StudentLayout";
 import {
-  createId,
-  getSubjevaMainTarget,
-  removeSubjevaMainTarget,
-  saveSubjevaMainTarget,
-  type SubjevaMainTarget,
-} from "../../../lib/subjevaStorage";
+  getDbMainTarget,
+  removeDbMainTarget,
+  saveDbMainTarget,
+} from "../../../lib/subjevaDb";
+import { type SubjevaMainTarget } from "../../../lib/subjevaStorage";
 
 const caveat = Caveat({
   subsets: ["latin"],
@@ -70,6 +69,9 @@ function getCountdown(targetDate: string, targetTime: string) {
 export default function MainTargetPage() {
   const router = useRouter();
 
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
   const [savedTarget, setSavedTarget] = useState<SubjevaMainTarget | null>(
     null
   );
@@ -88,16 +90,44 @@ export default function MainTargetPage() {
     seconds: 0,
   });
 
-  useEffect(() => {
-    const currentTarget = getSubjevaMainTarget();
+  async function loadMainTarget() {
+    try {
+      setIsLoading(true);
 
-    if (currentTarget) {
-      setSavedTarget(currentTarget);
-      setTargetName(currentTarget.name);
-      setTargetDate(currentTarget.date);
-      setTargetTime(currentTarget.time);
-      setTargetDescription(currentTarget.description);
+      const currentTarget = await getDbMainTarget();
+
+      if (currentTarget) {
+        setSavedTarget(currentTarget);
+        setTargetName(currentTarget.name);
+        setTargetDate(currentTarget.date);
+        setTargetTime(currentTarget.time);
+        setTargetDescription(currentTarget.description);
+      } else {
+        setSavedTarget(null);
+        setTargetName("");
+        setTargetDate("");
+        setTargetTime("10:00");
+        setTargetDescription("");
+      }
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Ana hedef yüklenemedi: ${error.message}`
+          : "Ana hedef yüklenemedi."
+      );
+    } finally {
+      setIsLoading(false);
     }
+  }
+
+  useEffect(() => {
+    loadMainTarget();
+
+    window.addEventListener("subjeva-data-updated", loadMainTarget);
+
+    return () => {
+      window.removeEventListener("subjeva-data-updated", loadMainTarget);
+    };
   }, []);
 
   useEffect(() => {
@@ -112,7 +142,7 @@ export default function MainTargetPage() {
     return () => clearInterval(timer);
   }, [targetDate, targetTime]);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const cleanTargetName = targetName.trim();
@@ -133,52 +163,73 @@ export default function MainTargetPage() {
       return;
     }
 
-    const currentTarget = getSubjevaMainTarget();
+    try {
+      setIsSaving(true);
 
-    const nextTarget: SubjevaMainTarget = {
-      id: currentTarget?.id || createId(),
-      name: cleanTargetName,
-      date: targetDate,
-      time: targetTime,
-      description:
-        cleanDescription ||
-        "Bu hedef için henüz açıklama eklenmedi. Daha sonra düzenlenebilir.",
-      createdAt: currentTarget?.createdAt || new Date().toISOString(),
-    };
+      await saveDbMainTarget({
+        name: cleanTargetName,
+        date: targetDate,
+        time: targetTime,
+        description:
+          cleanDescription ||
+          "Bu hedef için henüz açıklama eklenmedi. Daha sonra düzenlenebilir.",
+      });
 
-    saveSubjevaMainTarget(nextTarget);
-    setSavedTarget(nextTarget);
-    setSuccessMessage(`${cleanTargetName} ana hedef olarak kaydedildi!`);
+      const refreshedTarget = await getDbMainTarget();
 
-    setTimeout(() => {
-      router.push("/student/dashboard");
-    }, 900);
+      setSavedTarget(refreshedTarget);
+      setSuccessMessage(`${cleanTargetName} ana hedef olarak kaydedildi!`);
+
+      window.dispatchEvent(new Event("subjeva-data-updated"));
+
+      setTimeout(() => {
+        router.push("/student/dashboard");
+      }, 900);
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Ana hedef kaydedilemedi: ${error.message}`
+          : "Ana hedef kaydedilemedi."
+      );
+    } finally {
+      setIsSaving(false);
+    }
   }
 
-  function handleRemoveTarget() {
+  async function handleRemoveTarget() {
     const confirmed = confirm("Ana hedefi silmek istediğine emin misin?");
 
     if (!confirmed) return;
 
-    removeSubjevaMainTarget();
+    try {
+      await removeDbMainTarget();
 
-    setSavedTarget(null);
-    setTargetName("");
-    setTargetDate("");
-    setTargetTime("10:00");
-    setTargetDescription("");
-    setCountdown({
-      days: 0,
-      hours: 0,
-      minutes: 0,
-      seconds: 0,
-    });
+      setSavedTarget(null);
+      setTargetName("");
+      setTargetDate("");
+      setTargetTime("10:00");
+      setTargetDescription("");
+      setCountdown({
+        days: 0,
+        hours: 0,
+        minutes: 0,
+        seconds: 0,
+      });
 
-    setSuccessMessage("Ana hedef kaldırıldı.");
+      window.dispatchEvent(new Event("subjeva-data-updated"));
 
-    setTimeout(() => {
-      setSuccessMessage("");
-    }, 1600);
+      setSuccessMessage("Ana hedef kaldırıldı.");
+
+      setTimeout(() => {
+        setSuccessMessage("");
+      }, 1600);
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? `Ana hedef kaldırılamadı: ${error.message}`
+          : "Ana hedef kaldırılamadı."
+      );
+    }
   }
 
   const hasPreview = targetName.trim() && targetDate && targetTime;
@@ -186,13 +237,13 @@ export default function MainTargetPage() {
   return (
     <StudentLayout
       activePage="Main Target"
-      topbarSubtitle="Ana Hedef · Yerel kayıt"
+      topbarSubtitle="Ana Hedef · Supabase kayıt"
       primaryAction={{
         label: "Panel",
         href: "/student/dashboard",
       }}
       sidebarTitle="Ana nedenin."
-      sidebarDescription="Ana hedefini kaydet. Paneldeki geri sayım artık buradan beslenecek."
+      sidebarDescription="Ana hedefin artık sadece giriş yaptığın Supabase hesabına kaydedilir."
     >
       <AnimatePresence>
         {successMessage ? (
@@ -241,12 +292,12 @@ export default function MainTargetPage() {
           </p>
 
           <h1 className="mx-auto mt-4 max-w-5xl text-4xl font-extrabold tracking-tight text-slate-950 md:text-6xl">
-            Çalışma sisteminin arkasındaki hedefi oluştur.
+            Bu hedef sadece senin hesabına kaydedilecek.
           </h1>
 
           <p className="mx-auto mt-5 max-w-3xl text-lg leading-8 text-slate-600">
-            İlk girişte ana hedef boş başlar. Kendi hedefini oluşturduktan sonra
-            Paneldeki geri sayım otomatik olarak bu veriden beslenecek.
+            Ana hedef artık localStorage yerine Supabase veritabanında tutulur.
+            Farklı kullanıcılar birbirinin hedefini görmez.
           </p>
         </motion.div>
 
@@ -264,11 +315,15 @@ export default function MainTargetPage() {
             </p>
 
             <p className="mt-4 text-3xl font-extrabold text-slate-950">
-              {savedTarget ? savedTarget.name : "Hedef yok"}
+              {isLoading
+                ? "Yükleniyor..."
+                : savedTarget
+                ? savedTarget.name
+                : "Hedef yok"}
             </p>
 
             <p className="mt-2 text-sm font-medium text-slate-500">
-              Kayıtlı ana hedef
+              Bu hesaba ait ana hedef
             </p>
           </div>
 
@@ -304,12 +359,11 @@ export default function MainTargetPage() {
             <p
               className={`${caveat.className} text-3xl font-bold text-orange-600`}
             >
-              Hazır hedef yok.
+              Hesaba özel hedef.
             </p>
 
             <p className="mt-3 text-sm leading-6 text-slate-600">
-              Panel artık hazır YKS yazısı göstermez. Hedefi kullanıcı kendisi
-              oluşturur.
+              X hesabının hedefi Y hesabında görünmez.
             </p>
           </div>
         </motion.div>
@@ -396,12 +450,17 @@ export default function MainTargetPage() {
 
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
               <motion.button
-                whileHover={{ scale: 1.02, y: -1 }}
-                whileTap={{ scale: 0.98 }}
+                whileHover={{ scale: isSaving ? 1 : 1.02, y: isSaving ? 0 : -1 }}
+                whileTap={{ scale: isSaving ? 1 : 0.98 }}
                 type="submit"
-                className="rounded-2xl bg-orange-500 px-6 py-3.5 text-sm font-bold text-white shadow-lg shadow-orange-200 transition hover:bg-orange-600"
+                disabled={isSaving}
+                className={`rounded-2xl px-6 py-3.5 text-sm font-bold text-white shadow-lg shadow-orange-200 transition ${
+                  isSaving
+                    ? "cursor-not-allowed bg-orange-300"
+                    : "bg-orange-500 hover:bg-orange-600"
+                }`}
               >
-                Ana Hedefi Kaydet
+                {isSaving ? "Kaydediliyor..." : "Ana Hedefi Kaydet"}
               </motion.button>
 
               {savedTarget ? (
@@ -421,11 +480,6 @@ export default function MainTargetPage() {
                 Panele Dön
               </a>
             </div>
-
-            <p className="mt-4 text-sm font-medium leading-6 text-slate-500">
-              Bu bilgiler şimdilik localStorage içine kaydedilir. Supabase
-              aşamasında her kullanıcı için ayrı veritabanı kaydına dönüşecek.
-            </p>
           </motion.form>
 
           <motion.aside
@@ -545,7 +599,7 @@ export default function MainTargetPage() {
 
               <p className="mt-2 text-sm font-medium text-slate-500">
                 {savedTarget
-                  ? "Bu hedef localStorage içinde kayıtlı."
+                  ? "Bu hedef Supabase içinde bu kullanıcıya ait kayıtlı."
                   : "Panel şu anda + Ana Hedef gösterecek."}
               </p>
             </div>
